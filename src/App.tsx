@@ -21,6 +21,10 @@ function varianceClassExpense(varianceCents: number): string {
   return "";
 }
 
+function selectAllOnFocus(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.select();
+}
+
 export default function App() {
   const [months, setMonths] = useState<MonthRow[]>([]);
   const [yearMonth, setYearMonth] = useState(currentYearMonth());
@@ -179,6 +183,7 @@ export default function App() {
             className="input mono"
             value={yearMonth}
             onChange={(e) => setYearMonth(e.target.value)}
+            onFocus={selectAllOnFocus}
             placeholder="YYYY-MM"
           />
         </label>
@@ -391,6 +396,7 @@ function IncomeLineBlock({
             className="input-money"
             value={planned}
             onChange={(e) => setPlanned(e.target.value)}
+            onFocus={selectAllOnFocus}
             onBlur={() => void savePlanned()}
           />
         </td>
@@ -450,12 +456,14 @@ function IncomeEntriesPanel({
           placeholder="Label"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
+          onFocus={selectAllOnFocus}
         />
         <input
           className="input"
           placeholder="Amount"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          onFocus={selectAllOnFocus}
         />
         <input
           className="input mono"
@@ -535,6 +543,7 @@ function ExpenseLineBlock({
             className="input-money"
             value={planned}
             onChange={(e) => setPlanned(e.target.value)}
+            onFocus={selectAllOnFocus}
             onBlur={() => void savePlanned()}
           />
         </td>
@@ -595,12 +604,14 @@ function TransactionsPanel({
           placeholder="Payee"
           value={payee}
           onChange={(e) => setPayee(e.target.value)}
+          onFocus={selectAllOnFocus}
         />
         <input
           className="input"
           placeholder="Amount"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          onFocus={selectAllOnFocus}
         />
         <input
           className="input mono"
