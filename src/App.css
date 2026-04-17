@@ -400,19 +400,22 @@ body {
 
 .tab-strip {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 0;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  gap: 2px;
   align-items: flex-end;
+  align-content: flex-end;
   min-height: 2.25rem;
-  scrollbar-width: thin;
+  /* No overflow: auto — avoids stray scrollbars when few tabs fit easily */
+  overflow: visible;
 }
 
 .tab-chip {
   display: inline-flex;
   align-items: stretch;
-  flex-shrink: 0;
-  margin-right: 2px;
+  flex: 0 1 auto;
+  min-width: 4.25rem;
+  max-width: min(10rem, 100%);
+  margin-right: 0;
   border: 1px solid var(--border);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
@@ -434,13 +437,15 @@ body {
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
-  padding: 0.45rem 0.65rem;
+  padding: 0.4rem 0.5rem;
   cursor: pointer;
-  max-width: 9rem;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tab-chip-active .tab-chip-main {
