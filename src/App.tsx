@@ -25,6 +25,32 @@ function selectAllOnFocus(e: React.FocusEvent<HTMLInputElement>) {
   e.currentTarget.select();
 }
 
+function PlannedAmountInput({
+  value,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+}) {
+  return (
+    <span className="currency-field" title="USD — planned amount">
+      <span className="currency-symbol">$</span>
+      <input
+        className="input-money"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={selectAllOnFocus}
+        onBlur={onBlur}
+        inputMode="decimal"
+        autoComplete="off"
+        aria-label="Planned amount (USD)"
+      />
+    </span>
+  );
+}
+
 export default function App() {
   const [months, setMonths] = useState<MonthRow[]>([]);
   const [yearMonth, setYearMonth] = useState(currentYearMonth());
@@ -392,11 +418,9 @@ function IncomeLineBlock({
       <tr className={line.entries.length ? "has-detail" : ""}>
         <td>{line.name}</td>
         <td className="num">
-          <input
-            className="input-money"
+          <PlannedAmountInput
             value={planned}
-            onChange={(e) => setPlanned(e.target.value)}
-            onFocus={selectAllOnFocus}
+            onChange={setPlanned}
             onBlur={() => void savePlanned()}
           />
         </td>
@@ -539,11 +563,9 @@ function ExpenseLineBlock({
           {line.isSinkingFund && <span className="pill soft">sinking</span>}
         </td>
         <td className="num">
-          <input
-            className="input-money"
+          <PlannedAmountInput
             value={planned}
-            onChange={(e) => setPlanned(e.target.value)}
-            onFocus={selectAllOnFocus}
+            onChange={setPlanned}
             onBlur={() => void savePlanned()}
           />
         </td>
