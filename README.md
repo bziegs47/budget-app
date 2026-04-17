@@ -2,6 +2,12 @@
 
 Local-first desktop budget app (Tauri 2 + React + SQLite). USD amounts are stored as integer cents; the main grid uses rounded dollars and line detail shows exact cents.
 
+**Repository:** [github.com/bziegs47/budget-app](https://github.com/bziegs47/budget-app)
+
+## Git workflow
+
+This folder is the working copy; `origin` points at GitHub. Before starting work: `git pull --rebase`. After a meaningful change set: `git add -A`, `git commit -m "…"`, `git push`.
+
 ## Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (for the Tauri backend)

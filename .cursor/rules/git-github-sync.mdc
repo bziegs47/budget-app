@@ -1,0 +1,11 @@
+---
+description: Keep local budget-app and GitHub origin/main in sync when making changes
+alwaysApply: true
+---
+
+# GitHub sync (budget-app)
+
+- The project remote is **origin** → `https://github.com/bziegs47/budget-app.git` on branch **main**.
+- At the **start** of a work session (or before editing), prefer `git pull --rebase` so the local tree matches GitHub.
+- After **completing** a coherent set of edits (feature, fix, or doc update), **commit and push**: stage with `git add`, commit with a clear message, then `git push` so GitHub stays current.
+- Do not commit secrets, API keys, or local-only paths that should stay private.
