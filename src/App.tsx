@@ -51,7 +51,7 @@ export default function App() {
 
   const refresh = useCallback(async (ym: string) => {
     setError(null);
-    const v = await invoke<MonthView>("get_month_view", { year_month: ym });
+    const v = await invoke<MonthView>("get_month_view", { yearMonth: ym });
     setView(v);
   }, []);
 
@@ -62,7 +62,7 @@ export default function App() {
       const path = await invoke<string>("get_database_path");
       setDbPath(path);
       const ym = currentYearMonth();
-      await invoke("ensure_month", { year_month: ym });
+      await invoke("ensure_month", { yearMonth: ym });
       const list = await invoke<MonthRow[]>("list_months");
       setMonths(list);
       const active =
@@ -96,7 +96,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      await invoke("ensure_month", { year_month: yearMonth });
+      await invoke("ensure_month", { yearMonth });
       const list = await invoke<MonthRow[]>("list_months");
       setMonths(list);
       await refresh(yearMonth);
@@ -114,8 +114,8 @@ export default function App() {
     setError(null);
     try {
       await invoke("duplicate_month", {
-        from_year_month: yearMonth,
-        to_year_month: to.trim(),
+        fromYearMonth: yearMonth,
+        toYearMonth: to.trim(),
       });
       const list = await invoke<MonthRow[]>("list_months");
       setMonths(list);
@@ -378,7 +378,7 @@ function IncomeLineBlock({
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
     if (c === null) return;
-    await invoke("set_income_line_planned", { id: line.id, planned_cents: c });
+    await invoke("set_income_line_planned", { id: line.id, plannedCents: c });
     await onRefresh();
   };
 
@@ -432,10 +432,10 @@ function IncomeEntriesPanel({
     const c = parseMoneyToCents(amount);
     if (c === null || c === 0) return;
     await invoke("add_income_entry", {
-      income_line_id: lineId,
+      incomeLineId: lineId,
       label: label || "Income",
-      amount_cents: c,
-      received_on: date || null,
+      amountCents: c,
+      receivedOn: date || null,
     });
     setLabel("");
     setAmount("");
@@ -507,7 +507,7 @@ function ExpenseLineBlock({
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
     if (c === null) return;
-    await invoke("set_expense_line_planned", { id: line.id, planned_cents: c });
+    await invoke("set_expense_line_planned", { id: line.id, plannedCents: c });
     await onRefresh();
   };
 
@@ -577,10 +577,10 @@ function TransactionsPanel({
     const c = parseMoneyToCents(amount);
     if (c === null || c === 0) return;
     await invoke("add_transaction", {
-      expense_line_id: lineId,
+      expenseLineId: lineId,
       payee: payee || "Purchase",
-      amount_cents: c,
-      occurred_on: date || null,
+      amountCents: c,
+      occurredOn: date || null,
     });
     setPayee("");
     setAmount("");
