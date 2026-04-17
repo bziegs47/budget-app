@@ -373,6 +373,94 @@ body {
   color: #cbd5e8;
 }
 
+/* Browser-style month tabs */
+.tab-strip-container {
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.tab-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  overflow-x: auto;
+  align-items: flex-end;
+  min-height: 2.25rem;
+  scrollbar-width: thin;
+}
+
+.tab-chip {
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  margin-right: 2px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.tab-chip-active {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 -1px 0 0 var(--surface);
+  margin-bottom: -1px;
+  padding-bottom: 1px;
+  z-index: 1;
+}
+
+.tab-chip-main {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-chip-active .tab-chip-main {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tab-chip-main:hover {
+  color: var(--text);
+}
+
+.tab-chip-close {
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.45rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-chip-close:hover {
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.month-dropdown-label .month-dropdown {
+  min-width: 10rem;
+}
+
+.month-loading-banner {
+  margin: 0.5rem 0 1rem;
+}
+
 @media (max-width: 820px) {
   .ytd-strip {
     grid-template-columns: 1fr 1fr;

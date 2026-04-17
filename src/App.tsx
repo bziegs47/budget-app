@@ -53,7 +53,10 @@ function PlannedAmountInput({
 
 export default function App() {
   const [months, setMonths] = useState<MonthRow[]>([]);
-  const [yearMonth, setYearMonth] = useState(currentYearMonth());
+  /** YYYY-MM for the month currently shown in the main view */
+  const [activeMonth, setActiveMonth] = useState(currentYearMonth());
+  /** Open tabs (browser-style); order is left-to-right */
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [view, setView] = useState<MonthView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +100,8 @@ export default function App() {
       setMonths(list);
       const active =
         list.find((m) => m.yearMonth === ym)?.yearMonth ?? list[list.length - 1]?.yearMonth ?? ym;
-      setYearMonth(active);
+      setActiveMonth(active);
+      setOpenTabs([active]);
       await refresh(active);
     } catch (e) {
       setError(String(e));
@@ -110,10 +114,13 @@ export default function App() {
     void bootstrap();
   }, [bootstrap]);
 
-  const onSelectMonth = async (ym: string) => {
-    setYearMonth(ym);
+  /** Month dropdown: open month in a new tab if needed, then show it */
+  const onMonthDropdownChange = async (ym: string) => {
     setLoading(true);
+    setError(null);
     try {
+      setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
+      setActiveMonth(ym);
       await refresh(ym);
     } catch (e) {
       setError(String(e));
@@ -122,14 +129,53 @@ export default function App() {
     }
   };
 
-  const onEnsureMonth = async () => {
+  const activateTab = async (ym: string) => {
+    if (ym === activeMonth) return;
     setLoading(true);
     setError(null);
     try {
-      await invoke("ensure_month", { yearMonth });
+      setActiveMonth(ym);
+      await refresh(ym);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeTab = async (ym: string) => {
+    if (openTabs.length <= 1) return;
+    const idx = openTabs.indexOf(ym);
+    const newTabs = openTabs.filter((x) => x !== ym);
+    setOpenTabs(newTabs);
+    if (ym !== activeMonth) return;
+    const neighbor = openTabs[idx - 1] ?? openTabs[idx + 1] ?? newTabs[newTabs.length - 1];
+    setLoading(true);
+    setError(null);
+    try {
+      setActiveMonth(neighbor);
+      await refresh(neighbor);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onEnsureMonth = async () => {
+    const input = window.prompt("Open or create month (YYYY-MM)", currentYearMonth());
+    if (input == null) return;
+    const ym = input.trim();
+    if (!ym) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await invoke("ensure_month", { yearMonth: ym });
       const list = await invoke<MonthRow[]>("list_months");
       setMonths(list);
-      await refresh(yearMonth);
+      setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
+      setActiveMonth(ym);
+      await refresh(ym);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -140,17 +186,19 @@ export default function App() {
   const onDuplicate = async () => {
     const to = window.prompt("New month as YYYY-MM (must not exist yet)", "");
     if (!to) return;
+    const target = to.trim();
     setLoading(true);
     setError(null);
     try {
       await invoke("duplicate_month", {
-        fromYearMonth: yearMonth,
-        toYearMonth: to.trim(),
+        fromYearMonth: activeMonth,
+        toYearMonth: target,
       });
       const list = await invoke<MonthRow[]>("list_months");
       setMonths(list);
-      setYearMonth(to.trim());
-      await refresh(to.trim());
+      setOpenTabs((prev) => (prev.includes(target) ? prev : [...prev, target]));
+      setActiveMonth(target);
+      await refresh(target);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -164,7 +212,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `budget-export-${yearMonth}.csv`;
+    a.download = `budget-export-${activeMonth}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -173,6 +221,11 @@ export default function App() {
     () => [...months].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth)),
     [months],
   );
+
+  const monthSelectValue =
+    monthOptions.some((m) => m.yearMonth === activeMonth) && monthOptions.length > 0
+      ? activeMonth
+      : monthOptions[0]?.yearMonth ?? activeMonth;
 
   if (loading && !view) {
     return (
@@ -189,12 +242,13 @@ export default function App() {
           <span className="brand-mark">◆</span>
           <span>Budget</span>
         </div>
-        <label className="field-inline">
+        <label className="field-inline month-dropdown-label">
           <span className="label">Month</span>
           <select
-            value={yearMonth}
-            onChange={(e) => void onSelectMonth(e.target.value)}
-            className="select"
+            value={monthSelectValue}
+            onChange={(e) => void onMonthDropdownChange(e.target.value)}
+            className="select month-dropdown"
+            aria-label="Open or switch month (adds a tab if not already open)"
           >
             {monthOptions.map((m) => (
               <option key={m.id} value={m.yearMonth}>
@@ -202,16 +256,6 @@ export default function App() {
               </option>
             ))}
           </select>
-        </label>
-        <label className="field-inline">
-          <span className="label">Go to</span>
-          <input
-            className="input mono"
-            value={yearMonth}
-            onChange={(e) => setYearMonth(e.target.value)}
-            onFocus={selectAllOnFocus}
-            placeholder="YYYY-MM"
-          />
         </label>
         <button type="button" className="btn secondary" onClick={() => void onEnsureMonth()}>
           Open / create
@@ -224,13 +268,51 @@ export default function App() {
         </button>
       </header>
 
+      <div className="tab-strip-container" role="tablist" aria-label="Open month tabs">
+        <div className="tab-strip">
+          {openTabs.map((ym) => (
+            <div
+              key={ym}
+              className={`tab-chip ${ym === activeMonth ? "tab-chip-active" : ""}`}
+              role="presentation"
+            >
+              <button
+                type="button"
+                role="tab"
+                id={`tab-${ym}`}
+                aria-selected={ym === activeMonth}
+                className="tab-chip-main"
+                onClick={() => void activateTab(ym)}
+              >
+                {ym}
+              </button>
+              {openTabs.length > 1 && (
+                <button
+                  type="button"
+                  className="tab-chip-close"
+                  title={`Close ${ym}`}
+                  aria-label={`Close tab ${ym}`}
+                  onClick={() => void closeTab(ym)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
       {error && (
         <div className="banner error" role="alert">
           {error}
         </div>
       )}
 
-      {view && (
+      {loading && view && view.yearMonth !== activeMonth && (
+        <p className="muted month-loading-banner">Loading month…</p>
+      )}
+
+      {view && view.yearMonth === activeMonth && (
         <>
           <section className="ytd-strip">
             <div>
@@ -304,7 +386,7 @@ export default function App() {
                     line={line}
                     expanded={expandedIncome.has(line.id)}
                     onToggle={() => toggleIncome(line.id)}
-                    onRefresh={() => void refresh(yearMonth)}
+                    onRefresh={() => void refresh(activeMonth)}
                   />
                 ))}
               </tbody>
@@ -334,7 +416,7 @@ export default function App() {
                       line={line}
                       expanded={expandedExpense.has(line.id)}
                       onToggle={() => toggleExpense(line.id)}
-                      onRefresh={() => void refresh(yearMonth)}
+                      onRefresh={() => void refresh(activeMonth)}
                     />
                   ))}
                 </tbody>
