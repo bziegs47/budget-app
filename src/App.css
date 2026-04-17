@@ -193,6 +193,24 @@ body {
   margin-bottom: 1rem;
 }
 
+/* Sticky YTD header above month tabs */
+.ytd-strip-global {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+.ytd-strip-placeholder {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.35rem;
+}
+
 .ytd-label {
   font-size: 0.75rem;
   text-transform: uppercase;

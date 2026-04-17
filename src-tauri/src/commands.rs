@@ -545,15 +545,8 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
         rows.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
 
-    let mut rollovers: HashMap<i64, i64> = HashMap::new();
-    for (old_lid, _, _, _, _, _, is_neutral, _, _, _) in &lines {
-        let rv = if *is_neutral != 0 {
-            0
-        } else {
-            expense_line_end_balance(conn, *old_lid)?
-        };
-        rollovers.insert(*old_lid, rv);
-    }
+    // New month starts with planned amounts only — no rolled balances from source actuals
+    let rollover_in_for_duplicate: i64 = 0;
 
     let tx = conn.transaction().map_err(err)?;
 
@@ -600,7 +593,7 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
     }
 
     for (
-        old_lid,
+        _old_lid,
         old_bid,
         line_identity,
         sort_order,
@@ -615,7 +608,6 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
         let new_bid = *bucket_map
             .get(&old_bid)
             .ok_or_else(|| "Bucket mapping missing".to_string())?;
-        let rollover = *rollovers.get(&old_lid).unwrap_or(&0);
         tx.execute(
             r#"INSERT INTO expense_lines (
                 bucket_id, line_identity, sort_order, name, planned_cents, rollover_in_cents,
@@ -627,7 +619,7 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
                 sort_order,
                 name,
                 planned_cents,
-                rollover,
+                rollover_in_for_duplicate,
                 is_neutral,
                 is_sinking,
                 annual_est,

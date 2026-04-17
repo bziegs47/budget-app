@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
   centsToInputString,
@@ -8,6 +9,9 @@ import {
 } from "./money";
 import type { ExpenseLineDto, IncomeLineDto, MonthRow, MonthView } from "./types";
 import "./App.css";
+
+/** Strict YYYY-MM for prompts (month 01–12) */
+const YEAR_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function varianceClassIncome(varianceCents: number): string {
   if (varianceCents > 0) return "variance-good";
@@ -119,8 +123,10 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
-      setActiveMonth(ym);
+      flushSync(() => {
+        setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
+        setActiveMonth(ym);
+      });
       await refresh(ym);
     } catch (e) {
       setError(String(e));
@@ -134,7 +140,9 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      setActiveMonth(ym);
+      flushSync(() => {
+        setActiveMonth(ym);
+      });
       await refresh(ym);
     } catch (e) {
       setError(String(e));
@@ -147,13 +155,18 @@ export default function App() {
     if (openTabs.length <= 1) return;
     const idx = openTabs.indexOf(ym);
     const newTabs = openTabs.filter((x) => x !== ym);
-    setOpenTabs(newTabs);
-    if (ym !== activeMonth) return;
     const neighbor = openTabs[idx - 1] ?? openTabs[idx + 1] ?? newTabs[newTabs.length - 1];
+    if (ym !== activeMonth) {
+      setOpenTabs(newTabs);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      setActiveMonth(neighbor);
+      flushSync(() => {
+        setOpenTabs(newTabs);
+        setActiveMonth(neighbor);
+      });
       await refresh(neighbor);
     } catch (err) {
       setError(String(err));
@@ -166,15 +179,24 @@ export default function App() {
     const input = window.prompt("Open or create month (YYYY-MM)", currentYearMonth());
     if (input == null) return;
     const ym = input.trim();
-    if (!ym) return;
+    if (!ym) {
+      setError("Enter a month (YYYY-MM).");
+      return;
+    }
+    if (!YEAR_MONTH_PATTERN.test(ym)) {
+      setError("Use format YYYY-MM with month 01–12 (e.g. 2026-05).");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       await invoke("ensure_month", { yearMonth: ym });
       const list = await invoke<MonthRow[]>("list_months");
-      setMonths(list);
-      setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
-      setActiveMonth(ym);
+      flushSync(() => {
+        setMonths(list);
+        setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
+        setActiveMonth(ym);
+      });
       await refresh(ym);
     } catch (e) {
       setError(String(e));
@@ -184,20 +206,34 @@ export default function App() {
   };
 
   const onDuplicate = async () => {
-    const to = window.prompt("New month as YYYY-MM (must not exist yet)", "");
-    if (!to) return;
+    const to = window.prompt(
+      "Duplicate into new month (YYYY-MM). Copies structure and planned amounts only — no transactions or income entries.",
+      "",
+    );
+    if (to == null) return;
     const target = to.trim();
+    if (!target) {
+      setError("Enter the new month as YYYY-MM.");
+      return;
+    }
+    if (!YEAR_MONTH_PATTERN.test(target)) {
+      setError("Use format YYYY-MM with month 01–12 (e.g. 2026-06).");
+      return;
+    }
+    const sourceMonth = activeMonth;
     setLoading(true);
     setError(null);
     try {
       await invoke("duplicate_month", {
-        fromYearMonth: activeMonth,
+        fromYearMonth: sourceMonth,
         toYearMonth: target,
       });
       const list = await invoke<MonthRow[]>("list_months");
-      setMonths(list);
-      setOpenTabs((prev) => (prev.includes(target) ? prev : [...prev, target]));
-      setActiveMonth(target);
+      flushSync(() => {
+        setMonths(list);
+        setOpenTabs((prev) => (prev.includes(target) ? prev : [...prev, target]));
+        setActiveMonth(target);
+      });
       await refresh(target);
     } catch (e) {
       setError(String(e));
@@ -268,6 +304,32 @@ export default function App() {
         </button>
       </header>
 
+      <section className="ytd-strip ytd-strip-global" aria-label="Year-to-date totals for the active month">
+        {view && view.yearMonth === activeMonth ? (
+          <>
+            <div>
+              <div className="ytd-label">YTD income (actual)</div>
+              <div className="ytd-value">{formatUsd(view.ytd.incomeActualCents, "rounded")}</div>
+            </div>
+            <div>
+              <div className="ytd-label">YTD expenses (net)</div>
+              <div className="ytd-value">{formatUsd(view.ytd.expenseNetActualCents, "rounded")}</div>
+            </div>
+            <div>
+              <div className="ytd-label">YTD net</div>
+              <div className="ytd-value">{formatUsd(view.ytd.netActualCents, "rounded")}</div>
+            </div>
+            <div className="ytd-meta">
+              Calendar {view.ytd.year} through {view.ytd.throughMonth}
+            </div>
+          </>
+        ) : (
+          <div className="ytd-strip-placeholder">
+            <span className="muted">Loading year-to-date…</span>
+          </div>
+        )}
+      </section>
+
       <div className="tab-strip-container" role="tablist" aria-label="Open month tabs">
         <div className="tab-strip">
           {openTabs.map((ym) => (
@@ -314,24 +376,6 @@ export default function App() {
 
       {view && view.yearMonth === activeMonth && (
         <>
-          <section className="ytd-strip">
-            <div>
-              <div className="ytd-label">YTD income (actual)</div>
-              <div className="ytd-value">{formatUsd(view.ytd.incomeActualCents, "rounded")}</div>
-            </div>
-            <div>
-              <div className="ytd-label">YTD expenses (net)</div>
-              <div className="ytd-value">{formatUsd(view.ytd.expenseNetActualCents, "rounded")}</div>
-            </div>
-            <div>
-              <div className="ytd-label">YTD net</div>
-              <div className="ytd-value">{formatUsd(view.ytd.netActualCents, "rounded")}</div>
-            </div>
-            <div className="ytd-meta">
-              Calendar {view.ytd.year} through {view.ytd.throughMonth}
-            </div>
-          </section>
-
           <section className="card summary-card">
             <h2>Monthly summary</h2>
             <div className="summary-grid">
