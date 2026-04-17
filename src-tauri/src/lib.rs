@@ -3,6 +3,7 @@ mod db;
 mod models;
 
 use std::sync::Mutex;
+use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,

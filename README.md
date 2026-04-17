@@ -20,6 +20,14 @@ npm install
 npm run tauri dev
 ```
 
+If you see **`cargo metadata` … No such file or directory**, the shell does not have Cargo on `PATH` (common right after installing Rust or in a terminal that was opened before Rust). In that terminal run:
+
+```bash
+source "$HOME/.cargo/env"
+```
+
+Or restart the terminal / Cursor so `~/.cargo/bin` is loaded, then confirm with `which cargo`.
+
 ## Build (release)
 
 ```bash

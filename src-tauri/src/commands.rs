@@ -502,18 +502,6 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
         )
         .map_err(|_| format!("Source month {from_ym} not found"))?;
 
-    let mut stmt = conn
-        .prepare(
-            r#"
-        SELECT el.id, el.bucket_id, el.line_identity, el.sort_order, el.name, el.planned_cents,
-               el.is_neutral_transfer, el.is_sinking_fund, el.annual_estimate_cents, el.due_month_hint
-        FROM expense_lines el
-        JOIN expense_buckets eb ON eb.id = el.bucket_id
-        WHERE eb.month_id = ?1
-        ORDER BY eb.sort_order, el.sort_order
-        "#,
-        )
-        .map_err(err)?;
     let lines: Vec<(
         i64,
         i64,
@@ -525,24 +513,37 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
         i64,
         Option<i64>,
         Option<i32>,
-    )> = stmt
-        .query_map([from_id], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-                r.get(6)?,
-                r.get(7)?,
-                r.get(8)?,
-                r.get(9)?,
-            ))
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
+    )> = {
+        let mut stmt = conn
+            .prepare(
+                r#"
+        SELECT el.id, el.bucket_id, el.line_identity, el.sort_order, el.name, el.planned_cents,
+               el.is_neutral_transfer, el.is_sinking_fund, el.annual_estimate_cents, el.due_month_hint
+        FROM expense_lines el
+        JOIN expense_buckets eb ON eb.id = el.bucket_id
+        WHERE eb.month_id = ?1
+        ORDER BY eb.sort_order, el.sort_order
+        "#,
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([from_id], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
+                    r.get(9)?,
+                ))
+            })
+            .map_err(err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(err)?
+    };
 
     let mut rollovers: HashMap<i64, i64> = HashMap::new();
     for (old_lid, _, _, _, _, _, is_neutral, _, _, _) in &lines {
@@ -564,12 +565,12 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
         let mut s = tx
             .prepare("SELECT line_identity, sort_order, name, planned_cents FROM income_lines WHERE month_id = ?1 ORDER BY sort_order")
             .map_err(err)?;
-        s.query_map([from_id], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?
+        let rows = s
+            .query_map([from_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .map_err(err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
     for (line_identity, sort_order, name, planned_cents) in income_rows {
         tx.execute(
@@ -584,10 +585,10 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
         let mut s = tx
             .prepare("SELECT id, name, sort_order FROM expense_buckets WHERE month_id = ?1 ORDER BY sort_order, id")
             .map_err(err)?;
-        s.query_map([from_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map_err(err)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(err)?
+        let rows = s
+            .query_map([from_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
     for (old_bid, name, sort_order) in buckets {
         tx.execute(
