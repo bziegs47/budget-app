@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -14,6 +14,115 @@ import {
 } from "./money";
 import type { ExpenseBucketDto, ExpenseLineDto, IncomeLineDto, MonthRow, MonthView } from "./types";
 import "./App.css";
+
+type IconProps = { size?: number; className?: string };
+
+function ListIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <line x1="9" y1="6" x2="20" y2="6" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <line x1="9" y1="18" x2="20" y2="18" />
+      <circle cx="4.5" cy="6" r="1.25" />
+      <circle cx="4.5" cy="12" r="1.25" />
+      <circle cx="4.5" cy="18" r="1.25" />
+    </svg>
+  );
+}
+
+function PencilIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M4 20h4l11-11a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5z" />
+      <path d="M14 7l3 3" />
+    </svg>
+  );
+}
+
+function TrashIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M4 7h16" />
+      <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+      <path d="M6 7l1 12.2A2 2 0 0 0 9 21h6a2 2 0 0 0 2-1.8L18 7" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  variant,
+  active,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  variant?: "default" | "danger";
+  active?: boolean;
+  children: ReactNode;
+}) {
+  const cls = [
+    "icon-btn",
+    variant === "danger" ? "danger" : "",
+    active ? "active" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <button
+      type="button"
+      className={cls}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+    >
+      {children}
+    </button>
+  );
+}
 
 function varianceClassIncome(varianceCents: number): string {
   if (varianceCents > 0) return "variance-good";
@@ -1207,9 +1316,15 @@ function IncomeLineBlock({
           {formatUsd(line.varianceCents, "rounded")}
         </td>
         <td className="actions">
-          <button type="button" className="btn-link" onClick={onToggle}>
-            {expanded ? "Hide entries" : "Entries"}
-          </button>
+          <div className="row-icon-actions">
+            <IconButton
+              label={expanded ? "Hide entries" : "Show entries"}
+              onClick={onToggle}
+              active={expanded}
+            >
+              <ListIcon />
+            </IconButton>
+          </div>
         </td>
       </tr>
       {expanded && (
@@ -1357,24 +1472,25 @@ function ExpenseLineBlock({
           {formatUsd(line.varianceCents, "rounded")}
         </td>
         <td className="actions">
-          <button type="button" className="btn-link" onClick={onToggle}>
-            {expanded ? "Hide transactions" : "Transactions"}
-          </button>
-          {onRename && (
-            <button type="button" className="btn-link" onClick={onRename} title="Rename row">
-              Rename
-            </button>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              className="btn-link danger"
-              onClick={onDelete}
-              title="Delete row"
+          <div className="row-icon-actions">
+            <IconButton
+              label={expanded ? "Hide transactions" : "Show transactions"}
+              onClick={onToggle}
+              active={expanded}
             >
-              Delete
-            </button>
-          )}
+              <ListIcon />
+            </IconButton>
+            {onRename && (
+              <IconButton label="Rename row" onClick={onRename}>
+                <PencilIcon />
+              </IconButton>
+            )}
+            {onDelete && (
+              <IconButton label="Delete row" onClick={onDelete} variant="danger">
+                <TrashIcon />
+              </IconButton>
+            )}
+          </div>
         </td>
       </tr>
       {expanded && (
