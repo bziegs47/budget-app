@@ -946,6 +946,9 @@ export default function App() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [unsavedPromptOpen, setUnsavedPromptOpen] = useState(false);
   const [unsavedBusy, setUnsavedBusy] = useState(false);
+  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+  const periodMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const periodMenuRef = useRef<HTMLDivElement>(null);
 
   const openTabsRef = useRef<number[]>([]);
   const activeMonthIdRef = useRef<number>(0);
@@ -1176,6 +1179,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!periodMenuOpen) return;
+    const onMouseDown = (ev: MouseEvent) => {
+      const target = ev.target as Node | null;
+      if (!target) return;
+      if (periodMenuRef.current?.contains(target)) return;
+      if (periodMenuBtnRef.current?.contains(target)) return;
+      setPeriodMenuOpen(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setPeriodMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [periodMenuOpen]);
+
+  useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     void listen("menu:next-tab", () => cycleTab(1)).then((u) => unlisteners.push(u));
     void listen("menu:prev-tab", () => cycleTab(-1)).then((u) => unlisteners.push(u));
@@ -1309,7 +1332,7 @@ export default function App() {
     const { periodStart, periodEnd } = nextFullMonthAfterPeriodEnd(view.periodEnd);
     setPeriodModal({
       intent: "duplicate",
-      title: "Duplicate budget period",
+      title: "Duplicate current tab",
       confirmLabel: "Duplicate",
       initialStart: periodStart,
       initialEnd: periodEnd,
@@ -1449,12 +1472,56 @@ export default function App() {
             ))}
           </select>
         </label>
-        <button type="button" className="btn secondary" onClick={() => openCreatePeriodModal()}>
-          Open / create
-        </button>
-        <button type="button" className="btn secondary" onClick={() => openDuplicatePeriodModal()}>
-          Duplicate month
-        </button>
+        <div className="period-menu-wrap">
+          <button
+            ref={periodMenuBtnRef}
+            type="button"
+            className={`btn secondary period-menu-btn${periodMenuOpen ? " active" : ""}`}
+            onClick={() => setPeriodMenuOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={periodMenuOpen}
+            title="Create a new budget period"
+          >
+            <span>New time period</span>
+            <span className="period-menu-caret" aria-hidden="true">▾</span>
+          </button>
+          {periodMenuOpen && (
+            <div
+              ref={periodMenuRef}
+              className="period-menu"
+              role="menu"
+              aria-label="New time period options"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="period-menu-item"
+                onClick={() => {
+                  setPeriodMenuOpen(false);
+                  openCreatePeriodModal();
+                }}
+              >
+                <span className="period-menu-item-title">New blank period…</span>
+                <span className="period-menu-item-sub">Empty buckets and lines</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="period-menu-item"
+                onClick={() => {
+                  setPeriodMenuOpen(false);
+                  openDuplicatePeriodModal();
+                }}
+                disabled={!view}
+              >
+                <span className="period-menu-item-title">Duplicate current tab…</span>
+                <span className="period-menu-item-sub">
+                  Same buckets and lines, projected only (no actuals)
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
         <button type="button" className="btn primary" onClick={() => void onExport()}>
           Export CSV
         </button>
