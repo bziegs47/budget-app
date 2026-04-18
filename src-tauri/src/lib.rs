@@ -23,6 +23,7 @@ struct AppStateInner {
     paths: HashMap<String, PathBuf>,
     conns: HashMap<String, Connection>,
     auto_save: HashMap<String, bool>,
+    dirty: HashMap<String, bool>,
 }
 
 impl AppState {
@@ -32,6 +33,7 @@ impl AppState {
                 paths: HashMap::new(),
                 conns: HashMap::new(),
                 auto_save: HashMap::new(),
+                dirty: HashMap::new(),
             }),
         }
     }
@@ -57,7 +59,25 @@ impl AppState {
         inner.conns.remove(label);
         let conn = db::open_at_path(&new_path).map_err(|e| e.to_string())?;
         inner.conns.insert(label.to_string(), conn);
+        inner.dirty.insert(label.to_string(), false);
         Ok(())
+    }
+
+    fn mark_dirty(&self, label: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.dirty.insert(label.to_string(), true);
+        }
+    }
+
+    fn mark_clean(&self, label: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.dirty.insert(label.to_string(), false);
+        }
+    }
+
+    fn is_dirty(&self, label: &str) -> Result<bool, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        Ok(inner.dirty.get(label).copied().unwrap_or(false))
     }
 
     fn auto_save_enabled(&self, label: &str) -> Result<bool, String> {
@@ -76,6 +96,7 @@ impl AppState {
             inner.paths.remove(label);
             inner.conns.remove(label);
             inner.auto_save.remove(label);
+            inner.dirty.remove(label);
         }
     }
 
@@ -158,9 +179,14 @@ fn duplicate_period(
     period_start: String,
     period_end: String,
 ) -> Result<i64, String> {
-    state.with_conn_mut(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn_mut(&label, |conn| {
         commands::duplicate_period(conn, from_month_id, &period_start, &period_end)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -170,9 +196,14 @@ fn create_period(
     period_start: String,
     period_end: String,
 ) -> Result<i64, String> {
-    state.with_conn_mut(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn_mut(&label, |conn| {
         commands::create_period(conn, &period_start, &period_end)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -183,9 +214,14 @@ fn update_period_range(
     period_start: String,
     period_end: String,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| {
         commands::update_period_range(conn, month_id, &period_start, &period_end)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -195,9 +231,14 @@ fn set_income_line_planned(
     id: i64,
     planned_cents: i64,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| {
         commands::set_income_line_planned(conn, id, planned_cents)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -207,9 +248,14 @@ fn set_expense_line_planned(
     id: i64,
     planned_cents: i64,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| {
         commands::set_expense_line_planned(conn, id, planned_cents)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -219,9 +265,14 @@ fn add_expense_line(
     bucket_id: i64,
     name: String,
 ) -> Result<i64, String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| {
         commands::add_expense_line(conn, bucket_id, &name)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -231,9 +282,14 @@ fn rename_expense_line(
     id: i64,
     name: String,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| {
         commands::rename_expense_line(conn, id, &name)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -242,9 +298,12 @@ fn delete_expense_line(
     window: Window,
     id: i64,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
-        commands::delete_expense_line(conn, id)
-    })
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| commands::delete_expense_line(conn, id));
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -254,9 +313,14 @@ fn reorder_buckets(
     month_id: i64,
     ordered_ids: Vec<i64>,
 ) -> Result<(), String> {
-    state.with_conn_mut(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn_mut(&label, |conn| {
         commands::reorder_buckets(conn, month_id, &ordered_ids)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -268,9 +332,14 @@ fn add_transaction(
     amount_cents: i64,
     occurred_on: Option<String>,
 ) -> Result<i64, String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| {
         commands::add_transaction(conn, expense_line_id, payee, amount_cents, occurred_on)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -279,9 +348,12 @@ fn delete_transaction(
     window: Window,
     id: i64,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
-        commands::delete_transaction(conn, id)
-    })
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| commands::delete_transaction(conn, id));
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -293,9 +365,14 @@ fn add_income_entry(
     amount_cents: i64,
     received_on: Option<String>,
 ) -> Result<i64, String> {
-    state.with_conn(&label_of(&window), |conn| {
+    let win_label = label_of(&window);
+    let result = state.with_conn(&win_label, |conn| {
         commands::add_income_entry(conn, income_line_id, label, amount_cents, received_on)
-    })
+    });
+    if result.is_ok() {
+        state.mark_dirty(&win_label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -304,9 +381,12 @@ fn delete_income_entry(
     window: Window,
     id: i64,
 ) -> Result<(), String> {
-    state.with_conn(&label_of(&window), |conn| {
-        commands::delete_income_entry(conn, id)
-    })
+    let label = label_of(&window);
+    let result = state.with_conn(&label, |conn| commands::delete_income_entry(conn, id));
+    if result.is_ok() {
+        state.mark_dirty(&label);
+    }
+    result
 }
 
 #[tauri::command]
@@ -352,6 +432,18 @@ fn save_budget_as(
     }
     std::fs::copy(&src, &dest).map_err(|e| format!("Could not write '{}': {e}", dest.display()))?;
     state.switch_path(&label, dest)?;
+    state.mark_clean(&label);
+    Ok(())
+}
+
+#[tauri::command]
+fn is_dirty(state: tauri::State<AppState>, window: Window) -> Result<bool, String> {
+    state.is_dirty(&label_of(&window))
+}
+
+#[tauri::command]
+fn mark_clean(state: tauri::State<AppState>, window: Window) -> Result<(), String> {
+    state.mark_clean(&label_of(&window));
     Ok(())
 }
 
@@ -523,6 +615,8 @@ pub fn run() {
             get_database_path,
             save_budget_as,
             is_default_workspace,
+            is_dirty,
+            mark_clean,
             open_budget_in_new_window,
             save_snapshot,
             get_auto_save,

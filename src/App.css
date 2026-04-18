@@ -151,8 +151,26 @@ body {
 }
 
 .btn.secondary:hover,
-.btn.primary:hover {
+.btn.primary:hover,
+.btn.ghost:hover {
   filter: brightness(1.06);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.btn.ghost:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: none;
 }
 
 .btn-link {
@@ -605,6 +623,15 @@ body {
 
 .bucket-reorder-card {
   width: min(420px, 92vw);
+}
+
+.unsaved-changes-card {
+  width: min(460px, 92vw);
+}
+
+.unsaved-changes-actions {
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .bucket-reorder-list {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   centsToInputString,
@@ -289,6 +290,74 @@ function BucketReorderModal({
   );
 }
 
+function UnsavedChangesModal({
+  open,
+  busy,
+  onSave,
+  onDiscard,
+  onCancel,
+}: {
+  open: boolean;
+  busy: boolean;
+  onSave: () => void;
+  onDiscard: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!busy) onCancel();
+      }}
+    >
+      <div
+        className="modal-card unsaved-changes-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="unsaved-changes-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="unsaved-changes-title" className="modal-title">
+          Save changes before quitting?
+        </h2>
+        <p className="modal-hint">
+          This workspace has not been saved to a <code>.budget</code> file. Save it now or your
+          changes will only remain in this app's default workspace.
+        </p>
+        <div className="modal-actions unsaved-changes-actions">
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={onDiscard}
+            disabled={busy}
+          >
+            Quit without saving
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onSave}
+            disabled={busy}
+            autoFocus
+          >
+            {busy ? "Saving…" : "Save & quit"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [months, setMonths] = useState<MonthRow[]>([]);
   const [activeMonthId, setActiveMonthId] = useState(0);
@@ -304,6 +373,8 @@ export default function App() {
   const [reorderModalOpen, setReorderModalOpen] = useState(false);
   const [autoSaveOn, setAutoSaveOn] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [unsavedPromptOpen, setUnsavedPromptOpen] = useState(false);
+  const [unsavedBusy, setUnsavedBusy] = useState(false);
 
   const openTabsRef = useRef<number[]>([]);
   const activeMonthIdRef = useRef<number>(0);
@@ -463,6 +534,58 @@ export default function App() {
       setError(String(e));
     }
   }, [onSaveAs]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    const win = getCurrentWindow();
+    win
+      .onCloseRequested(async (event) => {
+        try {
+          const isDefault = await invoke<boolean>("is_default_workspace");
+          const dirty = await invoke<boolean>("is_dirty");
+          if (!isDefault || !dirty) return;
+          event.preventDefault();
+          setUnsavedPromptOpen(true);
+        } catch (err) {
+          setError(String(err));
+        }
+      })
+      .then((u) => {
+        unlisten = u;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  const closeAfterPrompt = useCallback(async () => {
+    setUnsavedPromptOpen(false);
+    try {
+      await getCurrentWindow().destroy();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  const onUnsavedSave = useCallback(async () => {
+    setUnsavedBusy(true);
+    try {
+      const wrote = await onSaveAs();
+      if (wrote) {
+        await closeAfterPrompt();
+      }
+    } finally {
+      setUnsavedBusy(false);
+    }
+  }, [onSaveAs, closeAfterPrompt]);
+
+  const onUnsavedDiscard = useCallback(async () => {
+    await closeAfterPrompt();
+  }, [closeAfterPrompt]);
+
+  const onUnsavedCancel = useCallback(() => {
+    setUnsavedPromptOpen(false);
+  }, []);
 
   const onToggleAutoSave = useCallback(async () => {
     try {
@@ -727,6 +850,13 @@ export default function App() {
         buckets={view?.expenseBuckets ?? []}
         onClose={() => setReorderModalOpen(false)}
         onCommit={(ids) => void reorderBuckets(ids)}
+      />
+      <UnsavedChangesModal
+        open={unsavedPromptOpen}
+        busy={unsavedBusy}
+        onSave={() => void onUnsavedSave()}
+        onDiscard={() => void onUnsavedDiscard()}
+        onCancel={onUnsavedCancel}
       />
       <header className="top-bar">
         <div className="brand">
