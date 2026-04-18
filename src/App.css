@@ -490,6 +490,12 @@ body {
   border-color: var(--border);
 }
 
+.date-picker-btn.active {
+  background: rgba(91, 140, 255, 0.12);
+  color: var(--accent);
+  border-color: rgba(91, 140, 255, 0.45);
+}
+
 .date-picker-btn:focus-visible,
 .date-clear:focus-visible {
   outline: none;
@@ -498,12 +504,22 @@ body {
   color: var(--text);
 }
 
-.date-picker-hidden {
+.date-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.date-picker-anchor {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
   opacity: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
   pointer-events: none;
 }
 

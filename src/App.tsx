@@ -189,13 +189,20 @@ function DateField({
   ariaLabel?: string;
 }) {
   const [parts, setParts] = useState<DateParts>(() => isoToParts(value));
+  const partsRef = useRef<DateParts>(parts);
   const mmRef = useRef<HTMLInputElement>(null);
   const ddRef = useRef<HTMLInputElement>(null);
   const yyRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const pickerWrapRef = useRef<HTMLSpanElement>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const justAdvancedRef = useRef(false);
 
   useEffect(() => {
-    setParts(isoToParts(value));
+    const next = isoToParts(value);
+    partsRef.current = next;
+    setParts(next);
   }, [value]);
 
   const emit = useCallback(
@@ -210,10 +217,14 @@ function DateField({
     [onChange, value],
   );
 
-  const update = (next: DateParts) => {
-    setParts(next);
-    emit(next);
-  };
+  const update = useCallback(
+    (next: DateParts) => {
+      partsRef.current = next;
+      setParts(next);
+      emit(next);
+    },
+    [emit],
+  );
 
   const onSegChange = (
     seg: keyof DateParts,
@@ -222,9 +233,10 @@ function DateField({
     nextRef: React.RefObject<HTMLInputElement | null> | null,
   ) => {
     const digits = raw.replace(/\D/g, "").slice(0, maxLen);
-    const next = { ...parts, [seg]: digits };
+    const next = { ...partsRef.current, [seg]: digits };
     update(next);
     if (digits.length === maxLen && nextRef?.current) {
+      justAdvancedRef.current = true;
       nextRef.current.focus();
       nextRef.current.select();
     }
@@ -263,8 +275,9 @@ function DateField({
     }
     if ((e.key === "/" || e.key === "-" || e.key === " ") && nextRef?.current) {
       e.preventDefault();
-      const padded = seg !== "yyyy" && parts[seg].length === 1 ? `0${parts[seg]}` : parts[seg];
-      const next = { ...parts, [seg]: padded };
+      const cur = partsRef.current[seg];
+      const padded = seg !== "yyyy" && cur.length === 1 ? `0${cur}` : cur;
+      const next = { ...partsRef.current, [seg]: padded };
       update(next);
       nextRef.current.focus();
       nextRef.current.select();
@@ -272,18 +285,37 @@ function DateField({
   };
 
   const padOnBlur = (seg: "mm" | "dd") => {
-    if (parts[seg].length === 1) {
-      const next = { ...parts, [seg]: `0${parts[seg]}` };
-      update(next);
+    if (justAdvancedRef.current) {
+      justAdvancedRef.current = false;
+      return;
+    }
+    const cur = partsRef.current[seg];
+    if (cur.length === 1) {
+      update({ ...partsRef.current, [seg]: `0${cur}` });
     }
   };
+
+  const closePicker = useCallback(() => {
+    if (!pickerOpen) return;
+    setPickerOpen(false);
+    try {
+      pickerRef.current?.blur();
+    } catch {
+      // ignore
+    }
+  }, [pickerOpen]);
 
   const openNativePicker = () => {
     const el = pickerRef.current;
     if (!el) return;
+    if (pickerOpen) {
+      closePicker();
+      return;
+    }
     if (typeof el.showPicker === "function") {
       try {
         el.showPicker();
+        setPickerOpen(true);
         return;
       } catch {
         // fall through
@@ -291,12 +323,32 @@ function DateField({
     }
     el.focus();
     el.click();
+    setPickerOpen(true);
   };
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onMouseDown = (ev: MouseEvent) => {
+      const target = ev.target as Node | null;
+      const wrap = pickerWrapRef.current;
+      if (target && wrap && wrap.contains(target)) return;
+      closePicker();
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") closePicker();
+    };
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [pickerOpen, closePicker]);
 
   const onNativePickerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const iso = e.target.value;
-    const next = isoToParts(iso);
-    update(next);
+    update(isoToParts(iso));
+    setPickerOpen(false);
   };
 
   const clear = () => {
@@ -307,7 +359,7 @@ function DateField({
   const hasAny = parts.mm !== "" || parts.dd !== "" || parts.yyyy !== "";
 
   return (
-    <div className="date-field" role="group" aria-label={ariaLabel}>
+    <div className="date-field" role="group" aria-label={ariaLabel} ref={rootRef}>
       <input
         ref={mmRef}
         className="date-seg date-seg-mm"
@@ -365,24 +417,27 @@ function DateField({
           ×
         </button>
       )}
-      <button
-        type="button"
-        className="date-picker-btn"
-        onClick={openNativePicker}
-        title="Pick a date"
-        aria-label="Open date picker"
-      >
-        <CalendarIcon />
-      </button>
-      <input
-        ref={pickerRef}
-        className="date-picker-hidden"
-        type="date"
-        value={partsToIso(parts)}
-        onChange={onNativePickerChange}
-        tabIndex={-1}
-        aria-hidden="true"
-      />
+      <span className="date-picker-wrap" ref={pickerWrapRef}>
+        <button
+          type="button"
+          className={`date-picker-btn${pickerOpen ? " active" : ""}`}
+          onClick={openNativePicker}
+          title="Pick a date"
+          aria-label="Open date picker"
+          aria-expanded={pickerOpen}
+        >
+          <CalendarIcon />
+        </button>
+        <input
+          ref={pickerRef}
+          className="date-picker-anchor"
+          type="date"
+          value={partsToIso(parts)}
+          onChange={onNativePickerChange}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
+      </span>
     </div>
   );
 }
