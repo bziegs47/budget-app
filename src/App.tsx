@@ -65,6 +65,30 @@ function PencilIcon({ size = 16, className }: IconProps) {
   );
 }
 
+function CalendarIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+      <line x1="3.5" y1="9.5" x2="20.5" y2="9.5" />
+      <line x1="8" y1="3.5" x2="8" y2="6.5" />
+      <line x1="16" y1="3.5" x2="16" y2="6.5" />
+    </svg>
+  );
+}
+
 function TrashIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -121,6 +145,245 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+type DateParts = { mm: string; dd: string; yyyy: string };
+
+function isoToParts(iso: string): DateParts {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return { mm: "", dd: "", yyyy: "" };
+  return { mm: m[2], dd: m[3], yyyy: m[1] };
+}
+
+function partsToIso(p: DateParts): string {
+  if (p.mm.length !== 2 || p.dd.length !== 2 || p.yyyy.length !== 4) return "";
+  const y = parseInt(p.yyyy, 10);
+  const mo = parseInt(p.mm, 10);
+  const d = parseInt(p.dd, 10);
+  if (!y || !mo || !d || mo < 1 || mo > 12 || d < 1 || d > 31) return "";
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== mo - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return "";
+  }
+  return `${p.yyyy}-${p.mm}-${p.dd}`;
+}
+
+/**
+ * Date input split into MM / DD / YYYY segments. Each segment auto-advances
+ * to the next when filled, and Backspace from an empty segment moves back to
+ * the previous one. A trailing calendar button opens the native date picker.
+ * `value` is an ISO YYYY-MM-DD string; an empty string means "no date".
+ */
+function DateField({
+  value,
+  onChange,
+  ariaLabel = "Date",
+}: {
+  value: string;
+  onChange: (iso: string) => void;
+  ariaLabel?: string;
+}) {
+  const [parts, setParts] = useState<DateParts>(() => isoToParts(value));
+  const mmRef = useRef<HTMLInputElement>(null);
+  const ddRef = useRef<HTMLInputElement>(null);
+  const yyRef = useRef<HTMLInputElement>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setParts(isoToParts(value));
+  }, [value]);
+
+  const emit = useCallback(
+    (next: DateParts) => {
+      if (next.mm === "" && next.dd === "" && next.yyyy === "") {
+        if (value !== "") onChange("");
+        return;
+      }
+      const iso = partsToIso(next);
+      if (iso && iso !== value) onChange(iso);
+    },
+    [onChange, value],
+  );
+
+  const update = (next: DateParts) => {
+    setParts(next);
+    emit(next);
+  };
+
+  const onSegChange = (
+    seg: keyof DateParts,
+    raw: string,
+    maxLen: number,
+    nextRef: React.RefObject<HTMLInputElement | null> | null,
+  ) => {
+    const digits = raw.replace(/\D/g, "").slice(0, maxLen);
+    const next = { ...parts, [seg]: digits };
+    update(next);
+    if (digits.length === maxLen && nextRef?.current) {
+      nextRef.current.focus();
+      nextRef.current.select();
+    }
+  };
+
+  const onSegKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    seg: keyof DateParts,
+    prevRef: React.RefObject<HTMLInputElement | null> | null,
+    nextRef: React.RefObject<HTMLInputElement | null> | null,
+  ) => {
+    const target = e.currentTarget;
+    if (e.key === "Backspace" && target.value === "" && prevRef?.current) {
+      e.preventDefault();
+      prevRef.current.focus();
+      const len = prevRef.current.value.length;
+      prevRef.current.setSelectionRange(len, len);
+      return;
+    }
+    if (e.key === "ArrowLeft" && target.selectionStart === 0 && prevRef?.current) {
+      e.preventDefault();
+      prevRef.current.focus();
+      const len = prevRef.current.value.length;
+      prevRef.current.setSelectionRange(len, len);
+      return;
+    }
+    if (
+      e.key === "ArrowRight" &&
+      target.selectionStart === target.value.length &&
+      nextRef?.current
+    ) {
+      e.preventDefault();
+      nextRef.current.focus();
+      nextRef.current.setSelectionRange(0, 0);
+      return;
+    }
+    if ((e.key === "/" || e.key === "-" || e.key === " ") && nextRef?.current) {
+      e.preventDefault();
+      const padded = seg !== "yyyy" && parts[seg].length === 1 ? `0${parts[seg]}` : parts[seg];
+      const next = { ...parts, [seg]: padded };
+      update(next);
+      nextRef.current.focus();
+      nextRef.current.select();
+    }
+  };
+
+  const padOnBlur = (seg: "mm" | "dd") => {
+    if (parts[seg].length === 1) {
+      const next = { ...parts, [seg]: `0${parts[seg]}` };
+      update(next);
+    }
+  };
+
+  const openNativePicker = () => {
+    const el = pickerRef.current;
+    if (!el) return;
+    if (typeof el.showPicker === "function") {
+      try {
+        el.showPicker();
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    el.focus();
+    el.click();
+  };
+
+  const onNativePickerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const iso = e.target.value;
+    const next = isoToParts(iso);
+    update(next);
+  };
+
+  const clear = () => {
+    update({ mm: "", dd: "", yyyy: "" });
+    mmRef.current?.focus();
+  };
+
+  const hasAny = parts.mm !== "" || parts.dd !== "" || parts.yyyy !== "";
+
+  return (
+    <div className="date-field" role="group" aria-label={ariaLabel}>
+      <input
+        ref={mmRef}
+        className="date-seg date-seg-mm"
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="MM"
+        aria-label="Month"
+        maxLength={2}
+        value={parts.mm}
+        onChange={(e) => onSegChange("mm", e.target.value, 2, ddRef)}
+        onKeyDown={(e) => onSegKeyDown(e, "mm", null, ddRef)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={() => padOnBlur("mm")}
+      />
+      <span className="date-sep" aria-hidden="true">/</span>
+      <input
+        ref={ddRef}
+        className="date-seg date-seg-dd"
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="DD"
+        aria-label="Day"
+        maxLength={2}
+        value={parts.dd}
+        onChange={(e) => onSegChange("dd", e.target.value, 2, yyRef)}
+        onKeyDown={(e) => onSegKeyDown(e, "dd", mmRef, yyRef)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={() => padOnBlur("dd")}
+      />
+      <span className="date-sep" aria-hidden="true">/</span>
+      <input
+        ref={yyRef}
+        className="date-seg date-seg-yyyy"
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="YYYY"
+        aria-label="Year"
+        maxLength={4}
+        value={parts.yyyy}
+        onChange={(e) => onSegChange("yyyy", e.target.value, 4, null)}
+        onKeyDown={(e) => onSegKeyDown(e, "yyyy", ddRef, null)}
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      {hasAny && (
+        <button
+          type="button"
+          className="date-clear"
+          onClick={clear}
+          title="Clear date"
+          aria-label="Clear date"
+        >
+          ×
+        </button>
+      )}
+      <button
+        type="button"
+        className="date-picker-btn"
+        onClick={openNativePicker}
+        title="Pick a date"
+        aria-label="Open date picker"
+      >
+        <CalendarIcon />
+      </button>
+      <input
+        ref={pickerRef}
+        className="date-picker-hidden"
+        type="date"
+        value={partsToIso(parts)}
+        onChange={onNativePickerChange}
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+    </div>
   );
 }
 
@@ -1382,12 +1645,7 @@ function IncomeEntriesPanel({
           onChange={(e) => setAmount(e.target.value)}
           onFocus={selectAllOnFocus}
         />
-        <input
-          className="input mono"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
+        <DateField value={date} onChange={setDate} ariaLabel="Received on" />
         <button type="button" className="btn secondary" onClick={() => void add()}>
           Add entry
         </button>
@@ -1548,12 +1806,7 @@ function TransactionsPanel({
           onChange={(e) => setAmount(e.target.value)}
           onFocus={selectAllOnFocus}
         />
-        <input
-          className="input mono"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
+        <DateField value={date} onChange={setDate} ariaLabel="Occurred on" />
         <button type="button" className="btn secondary" onClick={() => void add()}>
           Add transaction
         </button>
