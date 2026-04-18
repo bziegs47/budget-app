@@ -668,6 +668,41 @@ fn get_year_overview(
 }
 
 #[tauri::command]
+fn list_workspace_line_catalog(
+    state: tauri::State<AppState>,
+    window: Window,
+) -> Result<Vec<models::WorkspaceLineCatalogEntry>, String> {
+    state.with_conn(&label_of(&window), |conn| commands::list_workspace_line_catalog(conn))
+}
+
+#[tauri::command]
+fn get_line_calendar_report(
+    state: tauri::State<AppState>,
+    window: Window,
+    year: i32,
+    line_kind: String,
+    line_identity: String,
+    as_of: Option<String>,
+) -> Result<models::LineCalendarReport, String> {
+    state.with_conn(&label_of(&window), |conn| {
+        commands::get_line_calendar_report(conn, year, &line_kind, &line_identity, as_of.as_deref())
+    })
+}
+
+#[tauri::command]
+fn get_multi_line_calendar_report(
+    state: tauri::State<AppState>,
+    window: Window,
+    year: i32,
+    lines: Vec<models::LineRef>,
+    as_of: Option<String>,
+) -> Result<models::MultiLineCalendarReport, String> {
+    state.with_conn(&label_of(&window), |conn| {
+        commands::get_multi_line_calendar_report(conn, year, lines, as_of.as_deref())
+    })
+}
+
+#[tauri::command]
 fn export_workspace_json(
     state: tauri::State<AppState>,
     window: Window,
@@ -860,6 +895,7 @@ pub fn run() {
                     "export_json" => Some("menu:export-json"),
                     "toggle_sidebar" => Some("menu:toggle-sidebar"),
                     "show_overview" => Some("menu:show-overview"),
+                    "show_reports" => Some("menu:show-reports"),
                     "show_library" => Some("menu:show-library"),
                     "add_month" => Some("menu:add-month"),
                     "duplicate_month" => Some("menu:duplicate-month"),
@@ -915,6 +951,9 @@ pub fn run() {
             check_external_rename,
             scaffold_year,
             get_year_overview,
+            list_workspace_line_catalog,
+            get_line_calendar_report,
+            get_multi_line_calendar_report,
             export_workspace_json,
             get_settings,
             set_default_folder,
@@ -956,6 +995,9 @@ fn build_menu(app: &mut tauri::App) -> tauri::Result<()> {
         .build(app)?;
     let show_overview = MenuItemBuilder::with_id("show_overview", "Year Overview")
         .accelerator("Cmd+0")
+        .build(app)?;
+    let show_reports = MenuItemBuilder::with_id("show_reports", "Reports…")
+        .accelerator("Cmd+Shift+R")
         .build(app)?;
     let show_library = MenuItemBuilder::with_id("show_library", "Show Library")
         .accelerator("Cmd+Shift+L")
@@ -1015,6 +1057,7 @@ fn build_menu(app: &mut tauri::App) -> tauri::Result<()> {
         .item(&toggle_sidebar)
         .separator()
         .item(&show_overview)
+        .item(&show_reports)
         .item(&show_library)
         .separator()
         .item(&prev_month)

@@ -19,9 +19,14 @@ import type {
   ExternalRenameInfo,
   IncomeLineDto,
   LibraryEntry,
+  LineCalendarReport,
+  LineRef,
   MonthRow,
   MonthView,
+  MultiLineCalendarReport,
   RecentFile,
+  ReportsViewSeed,
+  WorkspaceLineCatalogEntry,
   WorkspaceMeta,
   YearOverview,
 } from "./types";
@@ -945,6 +950,7 @@ type AppView =
   | { kind: "welcome" }
   | { kind: "library" }
   | { kind: "overview" }
+  | { kind: "reports" }
   | { kind: "month"; monthId: number };
 
 function ChevronIcon({ open }: { open: boolean }) {
@@ -1168,6 +1174,7 @@ function Sidebar({
   months,
   view,
   onShowOverview,
+  onShowReports,
   onShowLibrary,
   onActivateMonth,
   onAddMonth,
@@ -1183,6 +1190,7 @@ function Sidebar({
   months: MonthRow[];
   view: AppView;
   onShowOverview: () => void;
+  onShowReports: () => void;
   onShowLibrary: () => void;
   onActivateMonth: (id: number) => void;
   onAddMonth: () => void;
@@ -1208,19 +1216,31 @@ function Sidebar({
   }
 
   const overviewActive = view.kind === "overview";
+  const reportsActive = view.kind === "reports";
   const libraryActive = view.kind === "library";
 
   return (
     <aside className="sidebar" aria-label="Workspace sidebar">
       <div className="sidebar-top">
-        <button
-          type="button"
-          className="sidebar-library-link"
-          onClick={onShowLibrary}
-          aria-pressed={libraryActive}
-        >
-          <FolderIcon /> All years…
-        </button>
+        <div className="sidebar-top-links">
+          <button
+            type="button"
+            className={`sidebar-library-link${reportsActive ? " active" : ""}`}
+            onClick={onShowReports}
+            aria-pressed={reportsActive}
+            title="Calendar reports (⌘⇧R)"
+          >
+            <CalendarIcon /> Reports
+          </button>
+          <button
+            type="button"
+            className="sidebar-library-link"
+            onClick={onShowLibrary}
+            aria-pressed={libraryActive}
+          >
+            <FolderIcon /> All years…
+          </button>
+        </div>
         <button
           type="button"
           className="sidebar-collapse-btn"
@@ -1637,6 +1657,392 @@ function YearOverviewView({
   );
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+function lineRefKey(r: { lineKind: string; lineIdentity: string }) {
+  return `${r.lineKind}:${r.lineIdentity}`;
+}
+
+function MonthlyBarsChart({
+  monthly,
+  className,
+}: {
+  monthly: { month: number; totalCents: number }[];
+  className?: string;
+}) {
+  const max = Math.max(...monthly.map((m) => Math.abs(m.totalCents)), 1);
+  return (
+    <div className={`monthly-bars-chart ${className ?? ""}`} aria-hidden="true">
+      {MONTH_ABBR.map((label, i) => {
+        const monthNum = i + 1;
+        const bucket = monthly.find((m) => m.month === monthNum);
+        const v = bucket?.totalCents ?? 0;
+        const h = Math.round((Math.abs(v) / max) * 100);
+        return (
+          <div key={label} className="monthly-bar-col">
+            <div className="monthly-bar-track">
+              <div className="monthly-bar-fill" style={{ height: `${h}%` }} />
+            </div>
+            <span className="monthly-bar-label">{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function YtdSlideOver({
+  open,
+  lineKind,
+  year,
+  report,
+  loading,
+  onClose,
+  onYearChange,
+  onOpenFullReports,
+}: {
+  open: boolean;
+  lineKind: "income" | "expense";
+  year: number;
+  report: LineCalendarReport | null;
+  loading: boolean;
+  onClose: () => void;
+  onYearChange: (y: number) => void;
+  onOpenFullReports: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const title = report?.displayName ?? "Line";
+
+  return (
+    <div className="drawer-backdrop" role="presentation" onClick={onClose}>
+      <aside
+        className="ytd-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ytd-drawer-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="ytd-drawer-head">
+          <div>
+            <h2 id="ytd-drawer-title" className="ytd-drawer-title">
+              {title}
+            </h2>
+            <p className="muted ytd-drawer-sub">
+              {lineKind === "income" ? "Income" : "Expense"} · calendar year totals by transaction
+              date
+            </p>
+          </div>
+          <button type="button" className="btn ghost drawer-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+
+        <div className="ytd-drawer-controls">
+          <label className="field-inline">
+            <span className="label">Year</span>
+            <input
+              className="input mono"
+              type="number"
+              min={2000}
+              max={2100}
+              value={year}
+              onChange={(e) => onYearChange(Number(e.target.value))}
+            />
+          </label>
+          <p className="muted small-hint">
+            Range {report ? `${report.rangeStart} → ${report.rangeEnd}` : "—"}
+          </p>
+        </div>
+
+        {loading && <p className="muted">Loading…</p>}
+
+        {!loading && report && (
+          <>
+            <div className="ytd-drawer-total">
+              <div className="ytd-label">Total ({report.year})</div>
+              <div className="ytd-value">{formatUsd(report.totalCents, "rounded")}</div>
+            </div>
+            <MonthlyBarsChart monthly={report.monthly} />
+            <div className="ytd-drawer-actions">
+              <button type="button" className="btn secondary" onClick={onOpenFullReports}>
+                Open in Reports
+              </button>
+            </div>
+            <h3 className="ytd-entries-title">Entries (up to 500)</h3>
+            <ul className="ytd-entry-list">
+              {report.entries.length === 0 ? (
+                <li className="muted">No dated entries in this range (add dates to transactions).</li>
+              ) : (
+                report.entries.map((e) => (
+                  <li key={`${lineKind}-${e.id}`} className="entry-row">
+                    <span>{e.label}</span>
+                    <span className="muted mono">{e.occurredOn ?? ""}</span>
+                    <span className="num">{formatUsd(e.amountCents, "exact")}</span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function ReportsView({
+  initial,
+  onInitialApplied,
+  monthRows,
+}: {
+  initial: ReportsViewSeed | null;
+  onInitialApplied: () => void;
+  monthRows: MonthRow[];
+}) {
+  const defaultYear = useMemo(() => {
+    const y = new Date().getFullYear();
+    if (monthRows.length === 0) return y;
+    const years = monthRows.map((m) => Number(m.periodStart.slice(0, 4)));
+    return Math.min(y, Math.max(...years));
+  }, [monthRows]);
+
+  const [year, setYear] = useState(defaultYear);
+  const [asOf, setAsOf] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [catalog, setCatalog] = useState<WorkspaceLineCatalogEntry[]>([]);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [report, setReport] = useState<MultiLineCalendarReport | null>(null);
+  const [reportErr, setReportErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  useEffect(() => {
+    setYear(defaultYear);
+  }, [defaultYear]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCatalogLoading(true);
+    void invoke<WorkspaceLineCatalogEntry[]>("list_workspace_line_catalog")
+      .then((c) => {
+        if (!cancelled) setCatalog(c);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!initial) return;
+    setYear(initial.year);
+    setAsOf(initial.asOf);
+    setSelectedKeys(new Set(initial.selected.map((s) => lineRefKey(s))));
+    onInitialApplied();
+  }, [initial, onInitialApplied]);
+
+  const filteredCatalog = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return catalog;
+    return catalog.filter(
+      (c) =>
+        c.displayName.toLowerCase().includes(q) ||
+        (c.bucketName?.toLowerCase().includes(q) ?? false) ||
+        c.lineIdentity.toLowerCase().includes(q),
+    );
+  }, [catalog, filter]);
+
+  const runReport = async () => {
+    setReportErr(null);
+    const lines: LineRef[] = [];
+    for (const c of catalog) {
+      const k = lineRefKey(c);
+      if (selectedKeys.has(k)) {
+        lines.push({ lineKind: c.lineKind, lineIdentity: c.lineIdentity });
+      }
+    }
+    if (lines.length === 0) {
+      setReportErr("Select at least one line in the table below.");
+      setReport(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const r = await invoke<MultiLineCalendarReport>("get_multi_line_calendar_report", {
+        year,
+        lines,
+        asOf,
+      });
+      setReport(r);
+    } catch (e) {
+      setReport(null);
+      setReportErr(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleLine = (c: WorkspaceLineCatalogEntry) => {
+    const k = lineRefKey(c);
+    setSelectedKeys((prev) => {
+      const n = new Set(prev);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  };
+
+  return (
+    <div className="reports-view">
+      <header className="reports-header">
+        <h1>Reports</h1>
+        <p className="muted">
+          Calendar-year totals from dated transactions and income entries, rolled up by line identity
+          across every month in this file.
+        </p>
+      </header>
+
+      <section className="card reports-filters">
+        <h2>Filters</h2>
+        <div className="reports-filter-row">
+          <label className="field-inline">
+            <span className="label">Year</span>
+            <input
+              className="input mono"
+              type="number"
+              min={2000}
+              max={2100}
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+            />
+          </label>
+          <label className="field-inline">
+            <span className="label">Cap range end (optional)</span>
+            <input
+              className="input mono"
+              placeholder="YYYY-MM-DD — default: today"
+              value={asOf ?? ""}
+              onChange={(e) => setAsOf(e.target.value.trim() || null)}
+            />
+          </label>
+          <button type="button" className="btn primary" onClick={() => void runReport()} disabled={loading}>
+            {loading ? "Running…" : "Run report"}
+          </button>
+        </div>
+        <p className="muted small-hint">
+          Leave the cap blank to use today (within the selected year). Set it to match a budget period
+          end if you want totals through that date only.
+        </p>
+      </section>
+
+      <section className="card reports-picker">
+        <h2>Lines in this workspace</h2>
+        {catalogLoading ? (
+          <p className="muted">Loading catalog…</p>
+        ) : catalog.length === 0 ? (
+          <p className="muted">Add months and budget lines to build a catalog.</p>
+        ) : (
+          <>
+            <input
+              className="input"
+              placeholder="Search by name or bucket…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              style={{ marginBottom: "0.75rem", width: "100%", maxWidth: "28rem" }}
+            />
+            <div className="catalog-table-wrap">
+              <table className="data-table catalog-table">
+                <thead>
+                  <tr>
+                    <th className="catalog-check" />
+                    <th>Kind</th>
+                    <th>Name</th>
+                    <th>Bucket</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCatalog.map((c) => {
+                    const k = lineRefKey(c);
+                    return (
+                      <tr key={k}>
+                        <td className="catalog-check">
+                          <input
+                            type="checkbox"
+                            checked={selectedKeys.has(k)}
+                            onChange={() => toggleLine(c)}
+                            aria-label={`Select ${c.displayName}`}
+                          />
+                        </td>
+                        <td>{c.lineKind}</td>
+                        <td>{c.displayName}</td>
+                        <td className="muted">{c.bucketName ?? "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+
+      {reportErr && (
+        <div className="banner error" role="alert">
+          {reportErr}
+        </div>
+      )}
+
+      {report && (
+        <section className="card reports-results">
+          <h2>
+            Results · {report.year}{" "}
+            <span className="muted">
+              ({report.rangeStart} → {report.rangeEnd})
+            </span>
+          </h2>
+          <div className="reports-combined-total">
+            <span className="ytd-label">Combined total</span>
+            <span className="ytd-value">{formatUsd(report.combinedTotalCents, "rounded")}</span>
+          </div>
+          <MonthlyBarsChart monthly={report.combinedMonthly} className="reports-combined-chart" />
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Line</th>
+                <th className="num">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.rows.map((row) => (
+                <tr key={lineRefKey(row)}>
+                  <td>{row.lineKind}</td>
+                  <td>{row.displayName}</td>
+                  <td className="num">{formatUsd(row.totalCents, "rounded")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function ExternalRenameModal({
   info,
   onAcknowledge,
@@ -1762,6 +2168,7 @@ function MonthBudgetView({
   onRenameRow,
   onDeleteRow,
   onOpenReorder,
+  onOpenLineYtd,
 }: {
   view: MonthView;
   expandedIncome: Set<number>;
@@ -1773,6 +2180,12 @@ function MonthBudgetView({
   onRenameRow: (lineId: number, name: string) => void;
   onDeleteRow: (lineId: number, name: string) => void;
   onOpenReorder: () => void;
+  onOpenLineYtd: (args: {
+    lineKind: "income" | "expense";
+    lineIdentity: string;
+    year: number;
+    asOf: string | null;
+  }) => void;
 }) {
   return (
     <>
@@ -1858,6 +2271,14 @@ function MonthBudgetView({
                 expanded={expandedIncome.has(line.id)}
                 onToggle={() => onToggleIncome(line.id)}
                 onRefresh={onRefresh}
+                onOpenYtd={() =>
+                  onOpenLineYtd({
+                    lineKind: "income",
+                    lineIdentity: line.lineIdentity,
+                    year: Number(view.periodEnd.slice(0, 4)),
+                    asOf: view.periodEnd,
+                  })
+                }
               />
             ))}
           </tbody>
@@ -1900,6 +2321,14 @@ function MonthBudgetView({
                   onRefresh={onRefresh}
                   onRename={() => onRenameRow(line.id, line.name)}
                   onDelete={() => onDeleteRow(line.id, line.name)}
+                  onOpenYtd={() =>
+                    onOpenLineYtd({
+                      lineKind: "expense",
+                      lineIdentity: line.lineIdentity,
+                      year: Number(view.periodEnd.slice(0, 4)),
+                      asOf: view.periodEnd,
+                    })
+                  }
                 />
               ))}
             </tbody>
@@ -1944,6 +2373,15 @@ export default function App() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [unsavedPromptOpen, setUnsavedPromptOpen] = useState(false);
   const [unsavedBusy, setUnsavedBusy] = useState(false);
+  const [ytdDrawer, setYtdDrawer] = useState<{
+    lineKind: "income" | "expense";
+    lineIdentity: string;
+    year: number;
+    asOf: string | null;
+  } | null>(null);
+  const [ytdReport, setYtdReport] = useState<LineCalendarReport | null>(null);
+  const [ytdLoading, setYtdLoading] = useState(false);
+  const [reportsInitial, setReportsInitial] = useState<ReportsViewSeed | null>(null);
 
   const monthsRef = useRef<MonthRow[]>([]);
   const viewRef = useRef<AppView>(view);
@@ -1957,6 +2395,33 @@ export default function App() {
   useEffect(() => {
     monthViewRef.current = monthView;
   }, [monthView]);
+
+  useEffect(() => {
+    if (!ytdDrawer) {
+      setYtdReport(null);
+      return;
+    }
+    let cancelled = false;
+    setYtdLoading(true);
+    void invoke<LineCalendarReport>("get_line_calendar_report", {
+      year: ytdDrawer.year,
+      lineKind: ytdDrawer.lineKind,
+      lineIdentity: ytdDrawer.lineIdentity,
+      asOf: ytdDrawer.asOf,
+    })
+      .then((r) => {
+        if (!cancelled) setYtdReport(r);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setYtdLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ytdDrawer]);
 
   const toggleIncome = (id: number) => {
     setExpandedIncome((prev) => {
@@ -2102,6 +2567,7 @@ export default function App() {
       setError(null);
       try {
         flushSync(() => {
+          setYtdDrawer(null);
           setView({ kind: "month", monthId });
         });
         await refreshMonthView(monthId);
@@ -2136,6 +2602,7 @@ export default function App() {
   );
 
   const showOverview = useCallback(async () => {
+    setYtdDrawer(null);
     setBusy(true);
     try {
       await refreshOverview();
@@ -2148,6 +2615,7 @@ export default function App() {
   }, [refreshOverview]);
 
   const showLibrary = useCallback(async () => {
+    setYtdDrawer(null);
     setBusy(true);
     try {
       await refreshLibrary();
@@ -2158,6 +2626,15 @@ export default function App() {
       setBusy(false);
     }
   }, [refreshLibrary]);
+
+  const onReportsInitialApplied = useCallback(() => setReportsInitial(null), []);
+
+  const showReports = useCallback((seed?: ReportsViewSeed) => {
+    setError(null);
+    setYtdDrawer(null);
+    setReportsInitial(seed ?? null);
+    setView({ kind: "reports" });
+  }, []);
 
   const onOpenFile = useCallback(async () => {
     try {
@@ -2433,6 +2910,7 @@ export default function App() {
     void listenSafe("menu:export-json", () => void onExportJson());
     void listenSafe("menu:toggle-sidebar", () => onToggleSidebar());
     void listenSafe("menu:show-overview", () => void showOverview());
+    void listenSafe("menu:show-reports", () => void showReports());
     void listenSafe("menu:show-library", () => void showLibrary());
     void listenSafe("menu:add-month", () => openCreatePeriodModal());
     void listenSafe("menu:duplicate-month", () => openDuplicatePeriodModal());
@@ -2451,6 +2929,7 @@ export default function App() {
     onRevealFolder,
     onToggleSidebar,
     showOverview,
+    showReports,
     showLibrary,
     openCreatePeriodModal,
     openDuplicatePeriodModal,
@@ -2677,6 +3156,7 @@ export default function App() {
         isDefaultWorkspace={isDefaultWorkspace}
         hasWorkspace={!isDefaultWorkspace || !!workspaceMeta?.yearLabel?.trim() || months.length > 0}
         onShowOverview={() => void showOverview()}
+        onShowReports={() => void showReports()}
         onShowLibrary={() => void showLibrary()}
         onActivateMonth={(id) => void activateMonth(id)}
         onAddMonth={openCreatePeriodModal}
@@ -2713,6 +3193,14 @@ export default function App() {
             title="Year overview"
           >
             Overview
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => void showReports()}
+            title="Calendar reports (⌘⇧R)"
+          >
+            Reports
           </button>
           <button
             type="button"
@@ -2827,6 +3315,14 @@ export default function App() {
             <p className="muted month-loading-banner">Loading overview…</p>
           )}
 
+          {view.kind === "reports" && (
+            <ReportsView
+              initial={reportsInitial}
+              onInitialApplied={onReportsInitialApplied}
+              monthRows={months}
+            />
+          )}
+
           {view.kind === "month" && monthView && monthView.monthId === view.monthId && (
             <MonthBudgetView
               view={monthView}
@@ -2841,6 +3337,9 @@ export default function App() {
               onRenameRow={onRenameRow}
               onDeleteRow={onDeleteRow}
               onOpenReorder={openReorderModal}
+              onOpenLineYtd={(args) => {
+                setYtdDrawer(args);
+              }}
             />
           )}
 
@@ -2853,6 +3352,30 @@ export default function App() {
           <span>Data file: {dbPath || "—"}</span>
         </footer>
       </div>
+
+      <YtdSlideOver
+        open={ytdDrawer !== null}
+        lineKind={ytdDrawer?.lineKind ?? "expense"}
+        year={ytdDrawer?.year ?? new Date().getFullYear()}
+        report={ytdReport}
+        loading={ytdLoading}
+        onClose={() => setYtdDrawer(null)}
+        onYearChange={(y) =>
+          setYtdDrawer((d) => (d ? { ...d, year: y } : null))
+        }
+        onOpenFullReports={() => {
+          if (!ytdDrawer) return;
+          setReportsInitial({
+            year: ytdDrawer.year,
+            asOf: ytdDrawer.asOf,
+            selected: [
+              { lineKind: ytdDrawer.lineKind, lineIdentity: ytdDrawer.lineIdentity },
+            ],
+          });
+          setYtdDrawer(null);
+          setView({ kind: "reports" });
+        }}
+      />
     </div>
   );
 }
@@ -2901,11 +3424,13 @@ function IncomeLineBlock({
   expanded,
   onToggle,
   onRefresh,
+  onOpenYtd,
 }: {
   line: IncomeLineDto;
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
+  onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
   useEffect(() => {
@@ -2936,6 +3461,12 @@ function IncomeLineBlock({
         </td>
         <td className="actions">
           <div className="row-icon-actions">
+            <IconButton
+              label="Calendar year totals (this line)"
+              onClick={onOpenYtd}
+            >
+              <CalendarIcon />
+            </IconButton>
             <IconButton
               label={expanded ? "Hide entries" : "Show entries"}
               onClick={onToggle}
@@ -3034,6 +3565,7 @@ function ExpenseLineBlock({
   onRefresh,
   onRename,
   onDelete,
+  onOpenYtd,
 }: {
   line: ExpenseLineDto;
   expanded: boolean;
@@ -3041,6 +3573,7 @@ function ExpenseLineBlock({
   onRefresh: () => void;
   onRename?: () => void;
   onDelete?: () => void;
+  onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
   useEffect(() => {
@@ -3087,6 +3620,12 @@ function ExpenseLineBlock({
         </td>
         <td className="actions">
           <div className="row-icon-actions">
+            <IconButton
+              label="Calendar year totals (this line)"
+              onClick={onOpenYtd}
+            >
+              <CalendarIcon />
+            </IconButton>
             <IconButton
               label={expanded ? "Hide transactions" : "Show transactions"}
               onClick={onToggle}

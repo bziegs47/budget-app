@@ -1,12 +1,13 @@
 use crate::db;
 use crate::period;
-use chrono::Datelike;
+use chrono::{Datelike, Local, NaiveDate};
 use crate::models::{
-    BucketRollup, ExpenseBucketDto, ExpenseLineDto, IncomeEntryDto, IncomeLineDto, MonthRow,
-    MonthSummary, MonthSummaryRow, MonthView, TransactionDto, WorkspaceMeta, YearOverview,
-    YtdTotals,
+    BucketRollup, CalendarMonthBucket, CalendarReportEntry, ExpenseBucketDto, ExpenseLineDto,
+    IncomeEntryDto, IncomeLineDto, LineCalendarReport, LineRef, MonthRow, MonthSummary,
+    MonthSummaryRow, MonthView, MultiLineCalendarReport, MultiLineCalendarRow, TransactionDto,
+    WorkspaceLineCatalogEntry, WorkspaceMeta, YearOverview, YtdTotals,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -1171,5 +1172,398 @@ pub fn rename_year_label(conn: &Connection, year_label: &str) -> Result<String, 
     )
     .map_err(err)?;
     Ok(cleaned)
+}
+
+/// Calendar year range [start, end] inclusive, using transaction/entry dates. `as_of` caps the end
+/// (e.g. active period end); if omitted, uses today capped to the year's last day.
+fn calendar_range_bounds(year: i32, as_of: Option<&str>) -> Result<(String, String), String> {
+    let start = NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(|| "Invalid year".to_string())?;
+    let year_end = NaiveDate::from_ymd_opt(year, 12, 31).ok_or_else(|| "Invalid year".to_string())?;
+    let today = Local::now().date_naive();
+    let cap = year_end.min(today);
+    let end = if let Some(s) = as_of {
+        let d = period::parse_iso(s)?;
+        d.min(cap).min(year_end)
+    } else {
+        cap.min(year_end)
+    };
+    let end = if end < start { start } else { end };
+    Ok((start.format("%Y-%m-%d").to_string(), end.format("%Y-%m-%d").to_string()))
+}
+
+fn latest_expense_line_label(
+    conn: &Connection,
+    line_identity: &str,
+) -> Result<(String, Option<String>), String> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            r#"
+            SELECT el.name, eb.name
+            FROM expense_lines el
+            JOIN expense_buckets eb ON eb.id = el.bucket_id
+            JOIN budget_months bm ON bm.id = eb.month_id
+            WHERE el.line_identity = ?1
+            ORDER BY bm.period_end DESC, el.id DESC
+            LIMIT 1
+            "#,
+            [line_identity],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(err)?;
+    Ok(row.map(|(a, b)| (a, Some(b))).unwrap_or_else(|| (line_identity.to_string(), None)))
+}
+
+fn latest_income_line_label(conn: &Connection, line_identity: &str) -> Result<String, String> {
+    let name: Option<String> = conn
+        .query_row(
+            r#"
+            SELECT il.name
+            FROM income_lines il
+            JOIN budget_months bm ON bm.id = il.month_id
+            WHERE il.line_identity = ?1
+            ORDER BY bm.period_end DESC, il.id DESC
+            LIMIT 1
+            "#,
+            [line_identity],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(err)?;
+    Ok(name.unwrap_or_else(|| line_identity.to_string()))
+}
+
+pub fn list_workspace_line_catalog(conn: &Connection) -> Result<Vec<WorkspaceLineCatalogEntry>, String> {
+    let mut out: Vec<WorkspaceLineCatalogEntry> = Vec::new();
+
+    let mut inc = conn
+        .prepare(
+            r#"
+            SELECT il.line_identity, il.name
+            FROM income_lines il
+            INNER JOIN budget_months bm ON bm.id = il.month_id
+            INNER JOIN (
+                SELECT il2.line_identity AS lid, MAX(bm2.period_end) AS max_end
+                FROM income_lines il2
+                INNER JOIN budget_months bm2 ON bm2.id = il2.month_id
+                GROUP BY il2.line_identity
+            ) latest ON latest.lid = il.line_identity AND bm.period_end = latest.max_end
+            ORDER BY il.name COLLATE NOCASE, il.line_identity
+            "#,
+        )
+        .map_err(err)?;
+    let inc_rows = inc
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+            ))
+        })
+        .map_err(err)?;
+    for row in inc_rows {
+        let (line_identity, display_name) = row.map_err(err)?;
+        out.push(WorkspaceLineCatalogEntry {
+            line_kind: "income".to_string(),
+            line_identity,
+            display_name,
+            bucket_name: None,
+        });
+    }
+
+    let mut exp = conn
+        .prepare(
+            r#"
+            SELECT el.line_identity, el.name, eb.name
+            FROM expense_lines el
+            INNER JOIN expense_buckets eb ON eb.id = el.bucket_id
+            INNER JOIN budget_months bm ON bm.id = eb.month_id
+            INNER JOIN (
+                SELECT el2.line_identity AS lid, MAX(bm2.period_end) AS max_end
+                FROM expense_lines el2
+                INNER JOIN expense_buckets eb2 ON eb2.id = el2.bucket_id
+                INNER JOIN budget_months bm2 ON bm2.id = eb2.month_id
+                GROUP BY el2.line_identity
+            ) latest ON latest.lid = el.line_identity AND bm.period_end = latest.max_end
+            ORDER BY eb.name COLLATE NOCASE, el.name COLLATE NOCASE, el.line_identity
+            "#,
+        )
+        .map_err(err)?;
+    let exp_rows = exp
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(err)?;
+    for row in exp_rows {
+        let (line_identity, display_name, bucket_name) = row.map_err(err)?;
+        out.push(WorkspaceLineCatalogEntry {
+            line_kind: "expense".to_string(),
+            line_identity,
+            display_name,
+            bucket_name: Some(bucket_name),
+        });
+    }
+
+    Ok(out)
+}
+
+fn expense_monthly_and_entries(
+    conn: &Connection,
+    line_identity: &str,
+    range_start: &str,
+    range_end: &str,
+) -> Result<(i64, Vec<CalendarMonthBucket>, Vec<CalendarReportEntry>), String> {
+    let total: i64 = conn
+        .query_row(
+            r#"
+            SELECT COALESCE(SUM(t.amount_cents), 0)
+            FROM transactions t
+            JOIN expense_lines el ON el.id = t.expense_line_id
+            WHERE el.line_identity = ?1
+              AND el.is_neutral_transfer = 0
+              AND t.occurred_on IS NOT NULL
+              AND date(t.occurred_on) >= date(?2)
+              AND date(t.occurred_on) <= date(?3)
+            "#,
+            params![line_identity, range_start, range_end],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+
+    let mut mstmt = conn
+        .prepare(
+            r#"
+            SELECT CAST(strftime('%m', t.occurred_on) AS INTEGER), COALESCE(SUM(t.amount_cents), 0)
+            FROM transactions t
+            JOIN expense_lines el ON el.id = t.expense_line_id
+            WHERE el.line_identity = ?1
+              AND el.is_neutral_transfer = 0
+              AND t.occurred_on IS NOT NULL
+              AND date(t.occurred_on) >= date(?2)
+              AND date(t.occurred_on) <= date(?3)
+            GROUP BY 1
+            ORDER BY 1
+            "#,
+        )
+        .map_err(err)?;
+    let monthly: Vec<CalendarMonthBucket> = mstmt
+        .query_map(params![line_identity, range_start, range_end], |r| {
+            Ok(CalendarMonthBucket {
+                month: r.get(0)?,
+                total_cents: r.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+
+    let mut estmt = conn
+        .prepare(
+            r#"
+            SELECT t.id, t.occurred_on, t.payee, t.amount_cents
+            FROM transactions t
+            JOIN expense_lines el ON el.id = t.expense_line_id
+            WHERE el.line_identity = ?1
+              AND el.is_neutral_transfer = 0
+              AND t.occurred_on IS NOT NULL
+              AND date(t.occurred_on) >= date(?2)
+              AND date(t.occurred_on) <= date(?3)
+            ORDER BY date(t.occurred_on) DESC, t.id DESC
+            LIMIT 500
+            "#,
+        )
+        .map_err(err)?;
+    let entries: Vec<CalendarReportEntry> = estmt
+        .query_map(params![line_identity, range_start, range_end], |r| {
+            Ok(CalendarReportEntry {
+                id: r.get(0)?,
+                occurred_on: r.get(1)?,
+                label: r.get::<_, String>(2)?,
+                amount_cents: r.get(3)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+
+    Ok((total, monthly, entries))
+}
+
+fn income_monthly_and_entries(
+    conn: &Connection,
+    line_identity: &str,
+    range_start: &str,
+    range_end: &str,
+) -> Result<(i64, Vec<CalendarMonthBucket>, Vec<CalendarReportEntry>), String> {
+    let total: i64 = conn
+        .query_row(
+            r#"
+            SELECT COALESCE(SUM(ie.amount_cents), 0)
+            FROM income_entries ie
+            JOIN income_lines il ON il.id = ie.income_line_id
+            WHERE il.line_identity = ?1
+              AND ie.received_on IS NOT NULL
+              AND date(ie.received_on) >= date(?2)
+              AND date(ie.received_on) <= date(?3)
+            "#,
+            params![line_identity, range_start, range_end],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+
+    let mut mstmt = conn
+        .prepare(
+            r#"
+            SELECT CAST(strftime('%m', ie.received_on) AS INTEGER), COALESCE(SUM(ie.amount_cents), 0)
+            FROM income_entries ie
+            JOIN income_lines il ON il.id = ie.income_line_id
+            WHERE il.line_identity = ?1
+              AND ie.received_on IS NOT NULL
+              AND date(ie.received_on) >= date(?2)
+              AND date(ie.received_on) <= date(?3)
+            GROUP BY 1
+            ORDER BY 1
+            "#,
+        )
+        .map_err(err)?;
+    let monthly: Vec<CalendarMonthBucket> = mstmt
+        .query_map(params![line_identity, range_start, range_end], |r| {
+            Ok(CalendarMonthBucket {
+                month: r.get(0)?,
+                total_cents: r.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+
+    let mut estmt = conn
+        .prepare(
+            r#"
+            SELECT ie.id, ie.received_on, ie.label, ie.amount_cents
+            FROM income_entries ie
+            JOIN income_lines il ON il.id = ie.income_line_id
+            WHERE il.line_identity = ?1
+              AND ie.received_on IS NOT NULL
+              AND date(ie.received_on) >= date(?2)
+              AND date(ie.received_on) <= date(?3)
+            ORDER BY date(ie.received_on) DESC, ie.id DESC
+            LIMIT 500
+            "#,
+        )
+        .map_err(err)?;
+    let entries: Vec<CalendarReportEntry> = estmt
+        .query_map(params![line_identity, range_start, range_end], |r| {
+            Ok(CalendarReportEntry {
+                id: r.get(0)?,
+                occurred_on: r.get(1)?,
+                label: r.get::<_, String>(2)?,
+                amount_cents: r.get(3)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+
+    Ok((total, monthly, entries))
+}
+
+pub fn get_line_calendar_report(
+    conn: &Connection,
+    year: i32,
+    line_kind: &str,
+    line_identity: &str,
+    as_of: Option<&str>,
+) -> Result<LineCalendarReport, String> {
+    let (range_start, range_end) = calendar_range_bounds(year, as_of)?;
+    let (display_name, total_cents, monthly, entries) = match line_kind {
+        "expense" => {
+            let (n, _) = latest_expense_line_label(conn, line_identity)?;
+            let (t, m, e) = expense_monthly_and_entries(conn, line_identity, &range_start, &range_end)?;
+            (n, t, m, e)
+        }
+        "income" => {
+            let n = latest_income_line_label(conn, line_identity)?;
+            let (t, m, e) = income_monthly_and_entries(conn, line_identity, &range_start, &range_end)?;
+            (n, t, m, e)
+        }
+        _ => return Err("line_kind must be 'income' or 'expense'".into()),
+    };
+
+    Ok(LineCalendarReport {
+        year,
+        line_kind: line_kind.to_string(),
+        line_identity: line_identity.to_string(),
+        display_name,
+        range_start,
+        range_end,
+        total_cents,
+        monthly,
+        entries,
+    })
+}
+
+pub fn get_multi_line_calendar_report(
+    conn: &Connection,
+    year: i32,
+    lines: Vec<LineRef>,
+    as_of: Option<&str>,
+) -> Result<MultiLineCalendarReport, String> {
+    let (range_start, range_end) = calendar_range_bounds(year, as_of)?;
+    let mut rows: Vec<MultiLineCalendarRow> = Vec::with_capacity(lines.len());
+    let mut combined: HashMap<i32, i64> = HashMap::new();
+
+    for pref in lines {
+        let kind = pref.line_kind.as_str();
+        let id = pref.line_identity.as_str();
+        let (name, total) = match kind {
+            "expense" => {
+                let (n, _) = latest_expense_line_label(conn, id)?;
+                let (t, m, _) = expense_monthly_and_entries(conn, id, &range_start, &range_end)?;
+                for b in m {
+                    *combined.entry(b.month).or_insert(0) += b.total_cents;
+                }
+                (n, t)
+            }
+            "income" => {
+                let n = latest_income_line_label(conn, id)?;
+                let (t, m, _) = income_monthly_and_entries(conn, id, &range_start, &range_end)?;
+                for b in m {
+                    *combined.entry(b.month).or_insert(0) += b.total_cents;
+                }
+                (n, t)
+            }
+            _ => return Err("line_kind must be 'income' or 'expense'".into()),
+        };
+        rows.push(MultiLineCalendarRow {
+            line_kind: kind.to_string(),
+            line_identity: id.to_string(),
+            display_name: name,
+            total_cents: total,
+        });
+    }
+
+    let mut months: Vec<i32> = combined.keys().copied().collect();
+    months.sort_unstable();
+    let combined_monthly: Vec<CalendarMonthBucket> = months
+        .into_iter()
+        .map(|m| CalendarMonthBucket {
+            month: m,
+            total_cents: *combined.get(&m).unwrap_or(&0),
+        })
+        .collect();
+    let combined_total_cents: i64 = rows.iter().map(|r| r.total_cents).sum();
+
+    Ok(MultiLineCalendarReport {
+        year,
+        range_start,
+        range_end,
+        rows,
+        combined_monthly,
+        combined_total_cents,
+    })
 }
 

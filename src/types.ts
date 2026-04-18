@@ -167,3 +167,61 @@ export type LibraryEntry = {
   monthCount: number;
   encrypted: boolean;
 };
+
+export type WorkspaceLineCatalogEntry = {
+  lineKind: "income" | "expense";
+  lineIdentity: string;
+  displayName: string;
+  bucketName: string | null;
+};
+
+export type CalendarMonthBucket = {
+  month: number;
+  totalCents: number;
+};
+
+export type CalendarReportEntry = {
+  id: number;
+  occurredOn: string | null;
+  label: string;
+  amountCents: number;
+};
+
+export type LineCalendarReport = {
+  year: number;
+  lineKind: string;
+  lineIdentity: string;
+  displayName: string;
+  rangeStart: string;
+  rangeEnd: string;
+  totalCents: number;
+  monthly: CalendarMonthBucket[];
+  entries: CalendarReportEntry[];
+};
+
+export type MultiLineCalendarRow = {
+  lineKind: string;
+  lineIdentity: string;
+  displayName: string;
+  totalCents: number;
+};
+
+export type MultiLineCalendarReport = {
+  year: number;
+  rangeStart: string;
+  rangeEnd: string;
+  rows: MultiLineCalendarRow[];
+  combinedMonthly: CalendarMonthBucket[];
+  combinedTotalCents: number;
+};
+
+export type LineRef = {
+  lineKind: "income" | "expense";
+  lineIdentity: string;
+};
+
+export type ReportsViewSeed = {
+  year: number;
+  asOf: string | null;
+  selected: LineRef[];
+};

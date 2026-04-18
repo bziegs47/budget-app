@@ -181,6 +181,76 @@ pub struct AppSettings {
     pub sidebar_collapsed: bool,
 }
 
+/// One logical income or expense line across the workspace (for reports / YTD pickers).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceLineCatalogEntry {
+    /// `"income"` or `"expense"`
+    pub line_kind: String,
+    pub line_identity: String,
+    pub display_name: String,
+    /// Expense bucket name from the latest period that contains this line (informational).
+    pub bucket_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarMonthBucket {
+    pub month: i32,
+    pub total_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarReportEntry {
+    pub id: i64,
+    /// ISO date or null
+    pub occurred_on: Option<String>,
+    pub label: String,
+    pub amount_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineCalendarReport {
+    pub year: i32,
+    pub line_kind: String,
+    pub line_identity: String,
+    pub display_name: String,
+    pub range_start: String,
+    pub range_end: String,
+    pub total_cents: i64,
+    pub monthly: Vec<CalendarMonthBucket>,
+    pub entries: Vec<CalendarReportEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiLineCalendarRow {
+    pub line_kind: String,
+    pub line_identity: String,
+    pub display_name: String,
+    pub total_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiLineCalendarReport {
+    pub year: i32,
+    pub range_start: String,
+    pub range_end: String,
+    pub rows: Vec<MultiLineCalendarRow>,
+    pub combined_monthly: Vec<CalendarMonthBucket>,
+    pub combined_total_cents: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineRef {
+    pub line_kind: String,
+    pub line_identity: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
