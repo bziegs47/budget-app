@@ -77,6 +77,9 @@ export type YtdTotals = {
 export type MonthView = {
   yearMonth: string;
   monthId: number;
+  periodStart: string;
+  periodEnd: string;
+  tabLabel: string;
   incomeLines: IncomeLineDto[];
   expenseBuckets: ExpenseBucketDto[];
   summary: MonthSummary;
@@ -86,4 +89,7 @@ export type MonthView = {
 export type MonthRow = {
   id: number;
   yearMonth: string;
+  periodStart: string;
+  periodEnd: string;
+  tabLabel: string;
 };

@@ -4,7 +4,11 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct MonthRow {
     pub id: i64,
+    /// Legacy slug / storage key (YYYY-MM or start__end)
     pub year_month: String,
+    pub period_start: String,
+    pub period_end: String,
+    pub tab_label: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -91,6 +95,7 @@ pub struct MonthSummary {
 #[serde(rename_all = "camelCase")]
 pub struct YtdTotals {
     pub year: i32,
+    /// Display string for the active period in YTD context (tab label)
     pub through_month: String,
     pub income_actual_cents: i64,
     pub expense_net_actual_cents: i64,
@@ -102,6 +107,9 @@ pub struct YtdTotals {
 pub struct MonthView {
     pub year_month: String,
     pub month_id: i64,
+    pub period_start: String,
+    pub period_end: String,
+    pub tab_label: String,
     pub income_lines: Vec<IncomeLineDto>,
     pub expense_buckets: Vec<ExpenseBucketDto>,
     pub summary: MonthSummary,

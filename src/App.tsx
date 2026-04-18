@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   centsToInputString,
   currentYearMonth,
   formatUsd,
+  fullMonthBoundsFromYearMonth,
+  nextFullMonthAfterPeriodEnd,
   parseMoneyToCents,
 } from "./money";
-import type { ExpenseLineDto, IncomeLineDto, MonthRow, MonthView } from "./types";
+import type { ExpenseBucketDto, ExpenseLineDto, IncomeLineDto, MonthRow, MonthView } from "./types";
 import "./App.css";
-
-/** Strict YYYY-MM for prompts (month 01–12) */
-const YEAR_MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function varianceClassIncome(varianceCents: number): string {
   if (varianceCents > 0) return "variance-good";
@@ -55,18 +56,267 @@ function PlannedAmountInput({
   );
 }
 
+type PeriodModalConfig = {
+  intent: "create" | "duplicate" | "edit";
+  editMonthId?: number;
+  title: string;
+  confirmLabel: string;
+  initialStart: string;
+  initialEnd: string;
+};
+
+function PeriodRangeModal({
+  config,
+  onClose,
+  onConfirm,
+}: {
+  config: PeriodModalConfig | null;
+  onClose: () => void;
+  onConfirm: (start: string, end: string) => void;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+
+  useEffect(() => {
+    if (!config) return;
+    setStart(config.initialStart);
+    setEnd(config.initialEnd);
+  }, [config]);
+
+  if (!config) return null;
+
+  const startYearMonth = start.length >= 7 ? start.slice(0, 7) : "";
+
+  const applyFullMonth = () => {
+    if (!startYearMonth) return;
+    const b = fullMonthBoundsFromYearMonth(startYearMonth);
+    setStart(b.periodStart);
+    setEnd(b.periodEnd);
+  };
+
+  const save = () => {
+    if (end < start) {
+      window.alert("End date must be on or after start date.");
+      return;
+    }
+    onConfirm(start, end);
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="period-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="period-modal-title" className="modal-title">
+          {config.title}
+        </h2>
+        <p className="modal-assume">
+          If the range is a full calendar month, the tab label uses the month shorthand (e.g. APR &apos;26).
+        </p>
+        <div className="modal-fields">
+          <label className="field-inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <span className="label">Start</span>
+            <input
+              className="input mono"
+              type="date"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+            />
+          </label>
+          <label className="field-inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <span className="label">End</span>
+            <input
+              className="input mono"
+              type="date"
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+            />
+          </label>
+          <div className="modal-quick">
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => applyFullMonth()}
+              disabled={!startYearMonth}
+            >
+              Use full month
+            </button>
+            <p className="modal-hint">
+              Sets the range to the full calendar month of the <strong>Start</strong> date (End is ignored).
+            </p>
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary" onClick={() => void save()}>
+            {config.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BucketReorderModal({
+  open,
+  buckets,
+  onClose,
+  onCommit,
+}: {
+  open: boolean;
+  buckets: ExpenseBucketDto[];
+  onClose: () => void;
+  onCommit: (orderedIds: number[]) => void;
+}) {
+  const [pending, setPending] = useState<number[]>([]);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setPending(buckets.map((b) => b.id));
+      setDraggingId(null);
+      setDropTargetId(null);
+    }
+  }, [open, buckets]);
+
+  if (!open) return null;
+
+  const nameFor = (id: number) => buckets.find((b) => b.id === id)?.name ?? `#${id}`;
+
+  const handleDrop = (targetId: number) => {
+    const dragged = draggingId;
+    setDraggingId(null);
+    setDropTargetId(null);
+    if (dragged == null || dragged === targetId) return;
+    setPending((prev) => {
+      const next = [...prev];
+      const from = next.indexOf(dragged);
+      const to = next.indexOf(targetId);
+      if (from < 0 || to < 0) return prev;
+      next.splice(from, 1);
+      next.splice(to, 0, dragged);
+      return next;
+    });
+  };
+
+  const done = () => {
+    onCommit(pending);
+    onClose();
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card bucket-reorder-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bucket-reorder-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="bucket-reorder-title" className="modal-title">
+          Reorder buckets
+        </h2>
+        <p className="modal-hint">
+          Drag a row to reorder. Click <strong>Done</strong> to apply changes to the budget.
+        </p>
+        <ul className="bucket-reorder-list" role="list">
+          {pending.map((id) => {
+            const isDragging = draggingId === id;
+            const isDropTarget = dropTargetId === id && draggingId !== id;
+            const cls = [
+              "bucket-reorder-row",
+              isDragging ? "dragging" : "",
+              isDropTarget ? "drop-target" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return (
+              <li
+                key={id}
+                className={cls}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(id));
+                  setDraggingId(id);
+                }}
+                onDragEnd={() => {
+                  setDraggingId(null);
+                  setDropTargetId(null);
+                }}
+                onDragOver={(e) => {
+                  if (draggingId == null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dropTargetId !== id) setDropTargetId(id);
+                }}
+                onDragLeave={() => {
+                  if (dropTargetId === id) setDropTargetId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(id);
+                }}
+              >
+                <span className="bucket-reorder-handle" aria-hidden="true">
+                  ⋮⋮
+                </span>
+                <span className="bucket-reorder-name">{nameFor(id)}</span>
+              </li>
+            );
+          })}
+          {pending.length === 0 && (
+            <li className="muted">No buckets to reorder.</li>
+          )}
+        </ul>
+        <div className="modal-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary" onClick={done}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [months, setMonths] = useState<MonthRow[]>([]);
-  /** YYYY-MM for the month currently shown in the main view */
-  const [activeMonth, setActiveMonth] = useState(currentYearMonth());
-  /** Open tabs (browser-style); order is left-to-right */
-  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [activeMonthId, setActiveMonthId] = useState(0);
+  /** Open tabs (browser-style); order is left-to-right — budget month ids */
+  const [openTabs, setOpenTabs] = useState<number[]>([]);
   const [view, setView] = useState<MonthView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedIncome, setExpandedIncome] = useState<Set<number>>(new Set());
   const [expandedExpense, setExpandedExpense] = useState<Set<number>>(new Set());
   const [dbPath, setDbPath] = useState<string>("");
+  const [periodModal, setPeriodModal] = useState<PeriodModalConfig | null>(null);
+  const [reorderModalOpen, setReorderModalOpen] = useState(false);
+  const [autoSaveOn, setAutoSaveOn] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  const openTabsRef = useRef<number[]>([]);
+  const activeMonthIdRef = useRef<number>(0);
+  const viewRef = useRef<MonthView | null>(null);
+  useEffect(() => {
+    openTabsRef.current = openTabs;
+  }, [openTabs]);
+  useEffect(() => {
+    activeMonthIdRef.current = activeMonthId;
+  }, [activeMonthId]);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   const toggleIncome = (id: number) => {
     setExpandedIncome((prev) => {
@@ -86,9 +336,9 @@ export default function App() {
     });
   };
 
-  const refresh = useCallback(async (ym: string) => {
+  const refresh = useCallback(async (monthId: number) => {
     setError(null);
-    const v = await invoke<MonthView>("get_month_view", { yearMonth: ym });
+    const v = await invoke<MonthView>("get_month_view", { monthId });
     setView(v);
   }, []);
 
@@ -99,14 +349,14 @@ export default function App() {
       const path = await invoke<string>("get_database_path");
       setDbPath(path);
       const ym = currentYearMonth();
-      await invoke("ensure_month", { yearMonth: ym });
+      const monthId = await invoke<number>("ensure_month", { yearMonth: ym });
       const list = await invoke<MonthRow[]>("list_months");
       setMonths(list);
-      const active =
-        list.find((m) => m.yearMonth === ym)?.yearMonth ?? list[list.length - 1]?.yearMonth ?? ym;
-      setActiveMonth(active);
-      setOpenTabs([active]);
-      await refresh(active);
+      setActiveMonthId(monthId);
+      setOpenTabs([monthId]);
+      await refresh(monthId);
+      const autoSave = await invoke<boolean>("get_auto_save");
+      setAutoSaveOn(autoSave);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -119,15 +369,16 @@ export default function App() {
   }, [bootstrap]);
 
   /** Month dropdown: open month in a new tab if needed, then show it */
-  const onMonthDropdownChange = async (ym: string) => {
+  const onMonthDropdownChange = async (idStr: string) => {
+    const id = Number(idStr);
     setLoading(true);
     setError(null);
     try {
       flushSync(() => {
-        setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
-        setActiveMonth(ym);
+        setOpenTabs((prev) => (prev.includes(id) ? prev : [...prev, id]));
+        setActiveMonthId(id);
       });
-      await refresh(ym);
+      await refresh(id);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -135,28 +386,201 @@ export default function App() {
     }
   };
 
-  const activateTab = async (ym: string) => {
-    if (ym === activeMonth) return;
-    setLoading(true);
-    setError(null);
+  const activateTab = useCallback(
+    async (monthId: number) => {
+      if (monthId === activeMonthIdRef.current) return;
+      setLoading(true);
+      setError(null);
+      try {
+        flushSync(() => {
+          setActiveMonthId(monthId);
+        });
+        await refresh(monthId);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [refresh],
+  );
+
+  const cycleTab = useCallback(
+    (direction: 1 | -1) => {
+      const tabs = openTabsRef.current;
+      if (tabs.length < 2) return;
+      const current = activeMonthIdRef.current;
+      const idx = tabs.indexOf(current);
+      if (idx === -1) return;
+      const nextIdx = (idx + direction + tabs.length) % tabs.length;
+      void activateTab(tabs[nextIdx]);
+    },
+    [activateTab],
+  );
+
+  const onOpenFile = useCallback(async () => {
     try {
-      flushSync(() => {
-        setActiveMonth(ym);
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Budget File", extensions: ["budget", "sqlite3", "db"] }],
       });
-      await refresh(ym);
+      const filePath = typeof picked === "string" ? picked : null;
+      if (!filePath) return;
+      await invoke("open_budget_in_new_window", { filePath });
     } catch (e) {
       setError(String(e));
-    } finally {
-      setLoading(false);
     }
-  };
+  }, []);
 
-  const closeTab = async (ym: string) => {
+  const onSaveAs = useCallback(async (): Promise<boolean> => {
+    try {
+      const target = await saveDialog({
+        title: "Save budget as",
+        defaultPath: "budget.budget",
+        filters: [{ name: "Budget File", extensions: ["budget"] }],
+      });
+      if (!target) return false;
+      await invoke("save_budget_as", { targetPath: target });
+      const newPath = await invoke<string>("get_database_path");
+      setDbPath(newPath);
+      return true;
+    } catch (e) {
+      setError(String(e));
+      return false;
+    }
+  }, []);
+
+  const onSave = useCallback(async () => {
+    try {
+      const isDefault = await invoke<boolean>("is_default_workspace");
+      const wrote = isDefault ? await onSaveAs() : true;
+      if (wrote) {
+        setSavedFlash(true);
+        window.setTimeout(() => setSavedFlash(false), 1500);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [onSaveAs]);
+
+  const onToggleAutoSave = useCallback(async () => {
+    try {
+      const next = !autoSaveOn;
+      await invoke("set_auto_save", { enabled: next });
+      setAutoSaveOn(next);
+      if (next) {
+        await invoke("save_snapshot");
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [autoSaveOn]);
+
+  const openReorderModal = useCallback(() => {
+    setReorderModalOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const unlisteners: UnlistenFn[] = [];
+    void listen("menu:next-tab", () => cycleTab(1)).then((u) => unlisteners.push(u));
+    void listen("menu:prev-tab", () => cycleTab(-1)).then((u) => unlisteners.push(u));
+    void listen("menu:open-file", () => void onOpenFile()).then((u) => unlisteners.push(u));
+    void listen("menu:save", () => void onSave()).then((u) => unlisteners.push(u));
+    void listen("menu:save-as", () => void onSaveAs()).then((u) => unlisteners.push(u));
+    void listen("menu:toggle-autosave", () => void onToggleAutoSave()).then((u) =>
+      unlisteners.push(u),
+    );
+    void listen("menu:reorganize", () => openReorderModal()).then((u) => unlisteners.push(u));
+    return () => {
+      unlisteners.forEach((u) => u());
+    };
+  }, [cycleTab, onOpenFile, onSave, onSaveAs, onToggleAutoSave, openReorderModal]);
+
+  useEffect(() => {
+    if (!autoSaveOn) return;
+    const intervalMs = 5 * 60 * 1000;
+    const id = window.setInterval(() => {
+      void invoke("save_snapshot").catch(() => {});
+    }, intervalMs);
+    return () => window.clearInterval(id);
+  }, [autoSaveOn]);
+
+  const reorderBuckets = useCallback(
+    async (orderedIds: number[]) => {
+      const v = viewRef.current;
+      if (!v) return;
+      const orderedBuckets = orderedIds
+        .map((id) => v.expenseBuckets.find((b) => b.id === id))
+        .filter((b): b is ExpenseBucketDto => Boolean(b));
+      flushSync(() => {
+        setView({ ...v, expenseBuckets: orderedBuckets });
+      });
+      try {
+        await invoke("reorder_buckets", {
+          monthId: activeMonthIdRef.current,
+          orderedIds,
+        });
+      } catch (e) {
+        setError(String(e));
+        await refresh(activeMonthIdRef.current);
+      }
+    },
+    [refresh],
+  );
+
+  const onAddRow = useCallback(
+    async (bucketId: number) => {
+      const name = window.prompt("New budget row name:");
+      if (name == null) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        await invoke("add_expense_line", { bucketId, name: trimmed });
+        await refresh(activeMonthIdRef.current);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [refresh],
+  );
+
+  const onRenameRow = useCallback(
+    async (lineId: number, currentName: string) => {
+      const name = window.prompt("Rename row:", currentName);
+      if (name == null) return;
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === currentName) return;
+      try {
+        await invoke("rename_expense_line", { id: lineId, name: trimmed });
+        await refresh(activeMonthIdRef.current);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [refresh],
+  );
+
+  const onDeleteRow = useCallback(
+    async (lineId: number, currentName: string) => {
+      const ok = window.confirm(`Delete row "${currentName}" and all its transactions?`);
+      if (!ok) return;
+      try {
+        await invoke("delete_expense_line", { id: lineId });
+        await refresh(activeMonthIdRef.current);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [refresh],
+  );
+
+  const closeTab = async (monthId: number) => {
     if (openTabs.length <= 1) return;
-    const idx = openTabs.indexOf(ym);
-    const newTabs = openTabs.filter((x) => x !== ym);
+    const idx = openTabs.indexOf(monthId);
+    const newTabs = openTabs.filter((x) => x !== monthId);
     const neighbor = openTabs[idx - 1] ?? openTabs[idx + 1] ?? newTabs[newTabs.length - 1];
-    if (ym !== activeMonth) {
+    if (monthId !== activeMonthId) {
       setOpenTabs(newTabs);
       return;
     }
@@ -165,7 +589,7 @@ export default function App() {
     try {
       flushSync(() => {
         setOpenTabs(newTabs);
-        setActiveMonth(neighbor);
+        setActiveMonthId(neighbor);
       });
       await refresh(neighbor);
     } catch (err) {
@@ -175,66 +599,83 @@ export default function App() {
     }
   };
 
-  const onEnsureMonth = async () => {
-    const input = window.prompt("Open or create month (YYYY-MM)", currentYearMonth());
-    if (input == null) return;
-    const ym = input.trim();
-    if (!ym) {
-      setError("Enter a month (YYYY-MM).");
-      return;
-    }
-    if (!YEAR_MONTH_PATTERN.test(ym)) {
-      setError("Use format YYYY-MM with month 01–12 (e.g. 2026-05).");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      await invoke("ensure_month", { yearMonth: ym });
-      const list = await invoke<MonthRow[]>("list_months");
-      flushSync(() => {
-        setMonths(list);
-        setOpenTabs((prev) => (prev.includes(ym) ? prev : [...prev, ym]));
-        setActiveMonth(ym);
-      });
-      await refresh(ym);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
+  const openCreatePeriodModal = () => {
+    const { periodStart, periodEnd } = fullMonthBoundsFromYearMonth(currentYearMonth());
+    setPeriodModal({
+      intent: "create",
+      title: "New budget period",
+      confirmLabel: "Create",
+      initialStart: periodStart,
+      initialEnd: periodEnd,
+    });
   };
 
-  const onDuplicate = async () => {
-    const to = window.prompt(
-      "Duplicate into new month (YYYY-MM). Copies structure and planned amounts only — no transactions or income entries.",
-      "",
-    );
-    if (to == null) return;
-    const target = to.trim();
-    if (!target) {
-      setError("Enter the new month as YYYY-MM.");
-      return;
-    }
-    if (!YEAR_MONTH_PATTERN.test(target)) {
-      setError("Use format YYYY-MM with month 01–12 (e.g. 2026-06).");
-      return;
-    }
-    const sourceMonth = activeMonth;
+  const openDuplicatePeriodModal = () => {
+    if (!view) return;
+    const { periodStart, periodEnd } = nextFullMonthAfterPeriodEnd(view.periodEnd);
+    setPeriodModal({
+      intent: "duplicate",
+      title: "Duplicate budget period",
+      confirmLabel: "Duplicate",
+      initialStart: periodStart,
+      initialEnd: periodEnd,
+    });
+  };
+
+  const openEditPeriodModal = (monthId: number) => {
+    const row = months.find((m) => m.id === monthId);
+    if (!row) return;
+    setPeriodModal({
+      intent: "edit",
+      editMonthId: monthId,
+      title: "Budget period for this tab",
+      confirmLabel: "Save dates",
+      initialStart: row.periodStart,
+      initialEnd: row.periodEnd,
+    });
+  };
+
+  const confirmPeriodModal = async (start: string, end: string) => {
+    if (!periodModal) return;
+    const cfg = periodModal;
+    setPeriodModal(null);
     setLoading(true);
     setError(null);
     try {
-      await invoke("duplicate_month", {
-        fromYearMonth: sourceMonth,
-        toYearMonth: target,
-      });
-      const list = await invoke<MonthRow[]>("list_months");
-      flushSync(() => {
+      if (cfg.intent === "create") {
+        const newId = await invoke<number>("create_period", { periodStart: start, periodEnd: end });
+        const list = await invoke<MonthRow[]>("list_months");
+        flushSync(() => {
+          setMonths(list);
+          setOpenTabs((prev) => (prev.includes(newId) ? prev : [...prev, newId]));
+          setActiveMonthId(newId);
+        });
+        await refresh(newId);
+      } else if (cfg.intent === "duplicate") {
+        const newId = await invoke<number>("duplicate_period", {
+          fromMonthId: activeMonthId,
+          periodStart: start,
+          periodEnd: end,
+        });
+        const list = await invoke<MonthRow[]>("list_months");
+        flushSync(() => {
+          setMonths(list);
+          setOpenTabs((prev) => (prev.includes(newId) ? prev : [...prev, newId]));
+          setActiveMonthId(newId);
+        });
+        await refresh(newId);
+      } else {
+        await invoke("update_period_range", {
+          monthId: cfg.editMonthId!,
+          periodStart: start,
+          periodEnd: end,
+        });
+        const list = await invoke<MonthRow[]>("list_months");
         setMonths(list);
-        setOpenTabs((prev) => (prev.includes(target) ? prev : [...prev, target]));
-        setActiveMonth(target);
-      });
-      await refresh(target);
+        if (cfg.editMonthId === activeMonthId) {
+          await refresh(activeMonthId);
+        }
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -248,20 +689,21 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `budget-export-${activeMonth}.csv`;
+    const label = view?.tabLabel?.replace(/\s+/g, "_") ?? String(activeMonthId);
+    a.download = `budget-export-${label}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const monthOptions = useMemo(
-    () => [...months].sort((a, b) => a.yearMonth.localeCompare(b.yearMonth)),
+    () => [...months].sort((a, b) => a.periodStart.localeCompare(b.periodStart)),
     [months],
   );
 
   const monthSelectValue =
-    monthOptions.some((m) => m.yearMonth === activeMonth) && monthOptions.length > 0
-      ? activeMonth
-      : monthOptions[0]?.yearMonth ?? activeMonth;
+    monthOptions.some((m) => m.id === activeMonthId) && monthOptions.length > 0
+      ? String(activeMonthId)
+      : String(monthOptions[0]?.id ?? activeMonthId);
 
   if (loading && !view) {
     return (
@@ -271,8 +713,21 @@ export default function App() {
     );
   }
 
+  const tabLabelFor = (id: number) => months.find((m) => m.id === id)?.tabLabel ?? `#${id}`;
+
   return (
     <div className="app-shell">
+      <PeriodRangeModal
+        config={periodModal}
+        onClose={() => setPeriodModal(null)}
+        onConfirm={(s, e) => void confirmPeriodModal(s, e)}
+      />
+      <BucketReorderModal
+        open={reorderModalOpen}
+        buckets={view?.expenseBuckets ?? []}
+        onClose={() => setReorderModalOpen(false)}
+        onCommit={(ids) => void reorderBuckets(ids)}
+      />
       <header className="top-bar">
         <div className="brand">
           <span className="brand-mark">◆</span>
@@ -287,25 +742,64 @@ export default function App() {
             aria-label="Open or switch month (adds a tab if not already open)"
           >
             {monthOptions.map((m) => (
-              <option key={m.id} value={m.yearMonth}>
-                {m.yearMonth}
+              <option key={m.id} value={String(m.id)}>
+                {m.tabLabel}
               </option>
             ))}
           </select>
         </label>
-        <button type="button" className="btn secondary" onClick={() => void onEnsureMonth()}>
+        <button type="button" className="btn secondary" onClick={() => openCreatePeriodModal()}>
           Open / create
         </button>
-        <button type="button" className="btn secondary" onClick={() => void onDuplicate()}>
+        <button type="button" className="btn secondary" onClick={() => openDuplicatePeriodModal()}>
           Duplicate month
         </button>
         <button type="button" className="btn primary" onClick={() => void onExport()}>
           Export CSV
         </button>
+        <div className="top-bar-spacer" />
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => void onOpenFile()}
+          title="Open a saved budget file in a new window (⌘O)"
+        >
+          Open file…
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => void onSave()}
+          title="Save changes to the current budget file (⌘S)"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => void onSaveAs()}
+          title="Save the current budget to a new file (⇧⌘S)"
+        >
+          Save as…
+        </button>
+        {savedFlash && (
+          <span className="saved-flash" role="status" aria-live="polite">
+            Saved
+          </span>
+        )}
+        <label className="field-inline auto-save-toggle" title="Saves a snapshot every 5 minutes">
+          <input
+            type="checkbox"
+            checked={autoSaveOn}
+            onChange={() => void onToggleAutoSave()}
+            aria-label="Toggle auto-save"
+          />
+          <span className="label">Auto-save</span>
+        </label>
       </header>
 
       <section className="ytd-strip ytd-strip-global" aria-label="Year-to-date totals for the active month">
-        {view && view.yearMonth === activeMonth ? (
+        {view && view.monthId === activeMonthId ? (
           <>
             <div>
               <div className="ytd-label">YTD income (actual)</div>
@@ -332,29 +826,34 @@ export default function App() {
 
       <div className="tab-strip-container" role="tablist" aria-label="Open month tabs">
         <div className="tab-strip">
-          {openTabs.map((ym) => (
+          {openTabs.map((tid) => (
             <div
-              key={ym}
-              className={`tab-chip ${ym === activeMonth ? "tab-chip-active" : ""}`}
+              key={tid}
+              className={`tab-chip ${tid === activeMonthId ? "tab-chip-active" : ""}`}
               role="presentation"
             >
               <button
                 type="button"
                 role="tab"
-                id={`tab-${ym}`}
-                aria-selected={ym === activeMonth}
+                id={`tab-${tid}`}
+                aria-selected={tid === activeMonthId}
                 className="tab-chip-main"
-                onClick={() => void activateTab(ym)}
+                title="Double-click to change this tab’s date range"
+                onClick={() => void activateTab(tid)}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  openEditPeriodModal(tid);
+                }}
               >
-                {ym}
+                {tabLabelFor(tid)}
               </button>
               {openTabs.length > 1 && (
                 <button
                   type="button"
                   className="tab-chip-close"
-                  title={`Close ${ym}`}
-                  aria-label={`Close tab ${ym}`}
-                  onClick={() => void closeTab(ym)}
+                  title={`Close ${tabLabelFor(tid)}`}
+                  aria-label={`Close tab ${tabLabelFor(tid)}`}
+                  onClick={() => void closeTab(tid)}
                 >
                   ×
                 </button>
@@ -370,11 +869,11 @@ export default function App() {
         </div>
       )}
 
-      {loading && view && view.yearMonth !== activeMonth && (
+      {loading && view && view.monthId !== activeMonthId && (
         <p className="muted month-loading-banner">Loading month…</p>
       )}
 
-      {view && view.yearMonth === activeMonth && (
+      {view && view.monthId === activeMonthId && (
         <>
           <section className="card summary-card">
             <h2>Monthly summary</h2>
@@ -430,43 +929,66 @@ export default function App() {
                     line={line}
                     expanded={expandedIncome.has(line.id)}
                     onToggle={() => toggleIncome(line.id)}
-                    onRefresh={() => void refresh(activeMonth)}
+                    onRefresh={() => void refresh(activeMonthId)}
                   />
                 ))}
               </tbody>
             </table>
           </section>
 
-          {view.expenseBuckets.map((bucket) => (
-            <section key={bucket.id} className="card bucket-card">
-              <div className="bucket-header">
-                <h2>{bucket.name}</h2>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Line</th>
-                    <th className="num">Planned</th>
-                    <th className="num">Rollover in</th>
-                    <th className="num">Actual</th>
-                    <th className="num">Variance</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {bucket.lines.map((line) => (
-                    <ExpenseLineBlock
-                      key={line.id}
-                      line={line}
-                      expanded={expandedExpense.has(line.id)}
-                      onToggle={() => toggleExpense(line.id)}
-                      onRefresh={() => void refresh(activeMonth)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          ))}
+          <div className="buckets-toolbar">
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => openReorderModal()}
+              title="Open the bucket reorder window (⌘R)"
+            >
+              Reorganize
+            </button>
+          </div>
+          {view.expenseBuckets.map((bucket) => {
+            return (
+              <section key={bucket.id} className="card bucket-card">
+                <div className="bucket-header">
+                  <h2>{bucket.name}</h2>
+                </div>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Line</th>
+                      <th className="num">Planned</th>
+                      <th className="num">Rollover in</th>
+                      <th className="num">Actual</th>
+                      <th className="num">Variance</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bucket.lines.map((line) => (
+                      <ExpenseLineBlock
+                        key={line.id}
+                        line={line}
+                        expanded={expandedExpense.has(line.id)}
+                        onToggle={() => toggleExpense(line.id)}
+                        onRefresh={() => void refresh(activeMonthId)}
+                        onRename={() => void onRenameRow(line.id, line.name)}
+                        onDelete={() => void onDeleteRow(line.id, line.name)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+                <div className="bucket-footer">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    onClick={() => void onAddRow(bucket.id)}
+                  >
+                    + Add row
+                  </button>
+                </div>
+              </section>
+            );
+          })}
         </>
       )}
 
@@ -651,11 +1173,15 @@ function ExpenseLineBlock({
   expanded,
   onToggle,
   onRefresh,
+  onRename,
+  onDelete,
 }: {
   line: ExpenseLineDto;
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
   useEffect(() => {
@@ -704,6 +1230,21 @@ function ExpenseLineBlock({
           <button type="button" className="btn-link" onClick={onToggle}>
             {expanded ? "Hide transactions" : "Transactions"}
           </button>
+          {onRename && (
+            <button type="button" className="btn-link" onClick={onRename} title="Rename row">
+              Rename
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              className="btn-link danger"
+              onClick={onDelete}
+              title="Delete row"
+            >
+              Delete
+            </button>
+          )}
         </td>
       </tr>
       {expanded && (

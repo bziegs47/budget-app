@@ -1,4 +1,6 @@
 use crate::db;
+use crate::period;
+use chrono::Datelike;
 use crate::models::{
     ExpenseBucketDto, ExpenseLineDto, IncomeEntryDto, IncomeLineDto, MonthRow, MonthSummary,
     MonthView, TransactionDto, YtdTotals,
@@ -13,13 +15,21 @@ fn err(e: impl ToString) -> String {
 
 pub fn list_months(conn: &Connection) -> Result<Vec<MonthRow>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, year_month FROM budget_months ORDER BY year_month")
+        .prepare(
+            "SELECT id, year_month, period_start, period_end FROM budget_months ORDER BY period_start, id",
+        )
         .map_err(err)?;
     let rows = stmt
         .query_map([], |r| {
+            let ps: String = r.get(2)?;
+            let pe: String = r.get(3)?;
+            let tab_label = period::format_tab_label(&ps, &pe);
             Ok(MonthRow {
                 id: r.get(0)?,
                 year_month: r.get(1)?,
+                period_start: ps,
+                period_end: pe,
+                tab_label,
             })
         })
         .map_err(err)?;
@@ -63,8 +73,9 @@ fn expense_line_end_balance(conn: &Connection, expense_line_id: i64) -> Result<i
     Ok(row.0 + row.1 - actual)
 }
 
-fn compute_ytd(conn: &Connection, year_month: &str) -> Result<YtdTotals, String> {
-    let (y, _m): (i32, i32) = parse_ym(year_month)?;
+fn compute_ytd(conn: &Connection, active_period_end: &str) -> Result<YtdTotals, String> {
+    let pe = period::parse_iso(active_period_end)?;
+    let y = pe.year();
     let year_prefix = format!("{y:04}");
 
     let income: i64 = conn
@@ -74,9 +85,10 @@ fn compute_ytd(conn: &Connection, year_month: &str) -> Result<YtdTotals, String>
             FROM income_entries ie
             JOIN income_lines il ON il.id = ie.income_line_id
             JOIN budget_months bm ON bm.id = il.month_id
-            WHERE substr(bm.year_month,1,4) = ?1 AND bm.year_month <= ?2
+            WHERE strftime('%Y', bm.period_end) = ?1
+              AND date(bm.period_end) <= date(?2)
             "#,
-            params![year_prefix, year_month],
+            params![year_prefix, active_period_end],
             |r| r.get(0),
         )
         .map_err(err)?;
@@ -90,17 +102,17 @@ fn compute_ytd(conn: &Connection, year_month: &str) -> Result<YtdTotals, String>
             JOIN expense_buckets eb ON eb.id = el.bucket_id
             JOIN budget_months bm ON bm.id = eb.month_id
             WHERE el.is_neutral_transfer = 0
-              AND substr(bm.year_month,1,4) = ?1
-              AND bm.year_month <= ?2
+              AND strftime('%Y', bm.period_end) = ?1
+              AND date(bm.period_end) <= date(?2)
             "#,
-            params![year_prefix, year_month],
+            params![year_prefix, active_period_end],
             |r| r.get(0),
         )
         .map_err(err)?;
 
     Ok(YtdTotals {
         year: y,
-        through_month: year_month.to_string(),
+        through_month: active_period_end.to_string(),
         income_actual_cents: income,
         expense_net_actual_cents: expense_net,
         net_actual_cents: income - expense_net,
@@ -120,16 +132,18 @@ fn parse_ym(s: &str) -> Result<(i32, i32), String> {
     Ok((y, m))
 }
 
-pub fn get_month_view(conn: &Connection, year_month: &str) -> Result<MonthView, String> {
-    let month_id: i64 = conn
+pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, String> {
+    let (year_month, period_start, period_end): (String, String, String) = conn
         .query_row(
-            "SELECT id FROM budget_months WHERE year_month = ?1",
-            [year_month],
-            |r| r.get(0),
+            "SELECT year_month, period_start, period_end FROM budget_months WHERE id = ?1",
+            [month_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
-        .map_err(|_| format!("No month {year_month} — create it first"))?;
+        .map_err(|_| format!("No budget period for id {month_id}"))?;
 
-    let ytd = compute_ytd(conn, year_month)?;
+    let tab_label = period::format_tab_label(&period_start, &period_end);
+    let mut ytd = compute_ytd(conn, &period_end)?;
+    ytd.through_month = tab_label.clone();
 
     let mut income_stmt = conn
         .prepare(
@@ -337,8 +351,11 @@ pub fn get_month_view(conn: &Connection, year_month: &str) -> Result<MonthView, 
     };
 
     Ok(MonthView {
-        year_month: year_month.to_string(),
+        year_month,
         month_id,
+        period_start,
+        period_end,
+        tab_label,
         income_lines,
         expense_buckets,
         summary,
@@ -347,18 +364,80 @@ pub fn get_month_view(conn: &Connection, year_month: &str) -> Result<MonthView, 
 }
 
 pub fn ensure_month(conn: &mut Connection, year_month: &str) -> Result<i64, String> {
-    parse_ym(year_month)?;
+    let (y, m) = parse_ym(year_month)?;
     if let Some(id) = db::month_id_for(conn, year_month).map_err(err)? {
         return Ok(id);
     }
+    let (ps, pe) = period::full_month_bounds(y, m as u32).map_err(err)?;
     conn.execute(
-        "INSERT INTO budget_months (year_month) VALUES (?1)",
-        [year_month],
+        "INSERT INTO budget_months (year_month, period_start, period_end) VALUES (?1, ?2, ?3)",
+        params![year_month, ps, pe],
     )
     .map_err(err)?;
     let id = conn.last_insert_rowid();
     seed_month(conn, id)?;
     Ok(id)
+}
+
+pub fn create_period(
+    conn: &mut Connection,
+    period_start: &str,
+    period_end: &str,
+) -> Result<i64, String> {
+    period::parse_iso(period_start)?;
+    period::parse_iso(period_end)?;
+    if period_end < period_start {
+        return Err("End date must be on or after start date".into());
+    }
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM budget_months WHERE period_start = ?1 AND period_end = ?2",
+            params![period_start, period_end],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if n > 0 {
+        return Err("A budget with this date range already exists.".into());
+    }
+    let slug = period::period_slug(period_start, period_end);
+    conn.execute(
+        "INSERT INTO budget_months (year_month, period_start, period_end) VALUES (?1, ?2, ?3)",
+        params![slug, period_start, period_end],
+    )
+    .map_err(err)?;
+    let id = conn.last_insert_rowid();
+    seed_month(conn, id)?;
+    Ok(id)
+}
+
+pub fn update_period_range(
+    conn: &Connection,
+    month_id: i64,
+    period_start: &str,
+    period_end: &str,
+) -> Result<(), String> {
+    period::parse_iso(period_start)?;
+    period::parse_iso(period_end)?;
+    if period_end < period_start {
+        return Err("End date must be on or after start date".into());
+    }
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM budget_months WHERE period_start = ?1 AND period_end = ?2 AND id != ?3",
+            params![period_start, period_end, month_id],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if n > 0 {
+        return Err("Another budget already uses this date range.".into());
+    }
+    let slug = period::period_slug(period_start, period_end);
+    conn.execute(
+        "UPDATE budget_months SET year_month = ?1, period_start = ?2, period_end = ?3 WHERE id = ?4",
+        params![slug, period_start, period_end, month_id],
+    )
+    .map_err(err)?;
+    Ok(())
 }
 
 fn seed_month(conn: &mut Connection, month_id: i64) -> Result<(), String> {
@@ -485,22 +564,34 @@ fn seed_month(conn: &mut Connection, month_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Result<(), String> {
-    parse_ym(from_ym)?;
-    parse_ym(to_ym)?;
-    if from_ym == to_ym {
-        return Err("Source and target month must differ".into());
+pub fn duplicate_period(
+    conn: &mut Connection,
+    from_month_id: i64,
+    period_start: &str,
+    period_end: &str,
+) -> Result<i64, String> {
+    period::parse_iso(period_start)?;
+    period::parse_iso(period_end)?;
+    if period_end < period_start {
+        return Err("End date must be on or after start date".into());
     }
-    if db::month_id_for(conn, to_ym).map_err(err)?.is_some() {
-        return Err(format!("Month {to_ym} already exists"));
-    }
-    let from_id: i64 = conn
+    let n: i64 = conn
         .query_row(
-            "SELECT id FROM budget_months WHERE year_month = ?1",
-            [from_ym],
+            "SELECT COUNT(*) FROM budget_months WHERE period_start = ?1 AND period_end = ?2",
+            params![period_start, period_end],
             |r| r.get(0),
         )
-        .map_err(|_| format!("Source month {from_ym} not found"))?;
+        .map_err(err)?;
+    if n > 0 {
+        return Err("A budget with this date range already exists.".into());
+    }
+    let from_id = from_month_id;
+    conn.query_row(
+        "SELECT 1 FROM budget_months WHERE id = ?1",
+        [from_id],
+        |_| Ok(()),
+    )
+    .map_err(|_| "Source budget not found".to_string())?;
 
     let lines: Vec<(
         i64,
@@ -547,11 +638,15 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
 
     // New month starts with planned amounts only — no rolled balances from source actuals
     let rollover_in_for_duplicate: i64 = 0;
+    let slug = period::period_slug(period_start, period_end);
 
     let tx = conn.transaction().map_err(err)?;
 
-    tx.execute("INSERT INTO budget_months (year_month) VALUES (?1)", [to_ym])
-        .map_err(err)?;
+    tx.execute(
+        "INSERT INTO budget_months (year_month, period_start, period_end) VALUES (?1, ?2, ?3)",
+        params![slug, period_start, period_end],
+    )
+    .map_err(err)?;
     let to_mid = tx.last_insert_rowid();
 
     let income_rows: Vec<(String, i32, String, i64)> = {
@@ -630,7 +725,7 @@ pub fn duplicate_month(conn: &mut Connection, from_ym: &str, to_ym: &str) -> Res
     }
 
     tx.commit().map_err(err)?;
-    Ok(())
+    Ok(to_mid)
 }
 
 pub fn set_income_line_planned(conn: &Connection, id: i64, planned_cents: i64) -> Result<(), String> {
@@ -648,6 +743,66 @@ pub fn set_expense_line_planned(conn: &Connection, id: i64, planned_cents: i64) 
         params![planned_cents, id],
     )
     .map_err(err)?;
+    Ok(())
+}
+
+pub fn add_expense_line(conn: &Connection, bucket_id: i64, name: &str) -> Result<i64, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Row name cannot be empty.".into());
+    }
+    let next_sort: i32 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM expense_lines WHERE bucket_id = ?1",
+            [bucket_id],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    let uid = Uuid::new_v4().to_string();
+    conn.execute(
+        r#"INSERT INTO expense_lines (
+            bucket_id, line_identity, sort_order, name, planned_cents, rollover_in_cents,
+            is_neutral_transfer, is_sinking_fund, annual_estimate_cents, due_month_hint
+        ) VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 0, NULL, NULL)"#,
+        params![bucket_id, uid, next_sort, trimmed],
+    )
+    .map_err(err)?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn rename_expense_line(conn: &Connection, id: i64, name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Row name cannot be empty.".into());
+    }
+    conn.execute(
+        "UPDATE expense_lines SET name = ?1 WHERE id = ?2",
+        params![trimmed, id],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn delete_expense_line(conn: &Connection, id: i64) -> Result<(), String> {
+    conn.execute("DELETE FROM expense_lines WHERE id = ?1", [id])
+        .map_err(err)?;
+    Ok(())
+}
+
+pub fn reorder_buckets(
+    conn: &mut Connection,
+    month_id: i64,
+    ordered_ids: &[i64],
+) -> Result<(), String> {
+    let tx = conn.transaction().map_err(err)?;
+    for (i, bid) in ordered_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE expense_buckets SET sort_order = ?1 WHERE id = ?2 AND month_id = ?3",
+            params![i as i32, bid, month_id],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
     Ok(())
 }
 
@@ -713,7 +868,8 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
 
     let months = list_months(conn)?;
     for m in months {
-        let ym = m.year_month.clone();
+        let slug = m.year_month.clone();
+        let label = m.tab_label.clone();
         let mut stmt = conn
             .prepare("SELECT id, name, planned_cents FROM income_lines WHERE month_id = ?1 ORDER BY sort_order")
             .map_err(err)?;
@@ -726,7 +882,7 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             let (id, name, planned) = r.map_err(err)?;
             w.push_str(&format!(
                 "income_line,{},{},{},\"{}\",{}\n",
-                ym, ym, id, name.replace('"', "'"), planned
+                label, slug, id, name.replace('"', "'"), planned
             ));
         }
 
@@ -757,8 +913,8 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
                 let (lid, lname, planned, neutral) = lr.map_err(err)?;
                 w.push_str(&format!(
                     "expense_line,{},{},{},\"{}\" (neutral={}),{}\n",
-                    ym,
-                    ym,
+                    label,
+                    slug,
                     lid,
                     lname.replace('"', "'"),
                     neutral,
@@ -775,12 +931,12 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             JOIN expense_lines el ON el.id = t.expense_line_id
             JOIN expense_buckets eb ON eb.id = el.bucket_id
             JOIN budget_months bm ON bm.id = eb.month_id
-            WHERE bm.year_month = ?1
+            WHERE bm.id = ?1
             ORDER BY t.id
             "#,
             )
             .map_err(err)?;
-        let txs = txq.query_map([&ym], |r| {
+        let txs = txq.query_map([m.id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
@@ -790,10 +946,10 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             ))
         }).map_err(err)?;
         for t in txs {
-            let (id, yym, payee, amt, line_id) = t.map_err(err)?;
+            let (id, _yym, payee, amt, line_id) = t.map_err(err)?;
             w.push_str(&format!(
                 "expense_tx,{},{},{},\"{}\",{}\n",
-                yym, yym, line_id, payee.replace('"', "'"), amt
+                label, slug, line_id, payee.replace('"', "'"), amt
             ));
             let _ = id;
         }
@@ -805,12 +961,12 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             FROM income_entries ie
             JOIN income_lines il ON il.id = ie.income_line_id
             JOIN budget_months bm ON bm.id = il.month_id
-            WHERE bm.year_month = ?1
+            WHERE bm.id = ?1
             ORDER BY ie.id
             "#,
             )
             .map_err(err)?;
-        let ies = ie.query_map([&ym], |r| {
+        let ies = ie.query_map([m.id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
@@ -820,10 +976,10 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             ))
         }).map_err(err)?;
         for row in ies {
-            let (_id, yym, label, amt, line_id) = row.map_err(err)?;
+            let (_id, _ym, entry_label, amt, line_id) = row.map_err(err)?;
             w.push_str(&format!(
                 "income_entry,{},{},{},\"{}\",{}\n",
-                yym, yym, line_id, label.replace('"', "'"), amt
+                label, slug, line_id, entry_label.replace('"', "'"), amt
             ));
         }
     }
@@ -831,6 +987,3 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
     Ok(w)
 }
 
-pub fn database_file_path() -> String {
-    db::database_path().to_string_lossy().into_owned()
-}

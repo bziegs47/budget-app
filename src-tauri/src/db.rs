@@ -1,5 +1,5 @@
 use rusqlite::{Connection, OptionalExtension};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn database_path() -> PathBuf {
     let dir = dirs::data_local_dir()
@@ -9,8 +9,10 @@ pub fn database_path() -> PathBuf {
     dir.join("budget.sqlite3")
 }
 
-pub fn open_connection() -> rusqlite::Result<Connection> {
-    let path = database_path();
+pub fn open_at_path(path: &Path) -> rusqlite::Result<Connection> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     migrate(&conn)?;
@@ -83,6 +85,43 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_transactions_line ON transactions(expense_line_id);
         CREATE INDEX IF NOT EXISTS idx_income_entries_line ON income_entries(income_line_id);
         "#,
+    )?;
+    migrate_v1_budget_months_periods(conn)?;
+    Ok(())
+}
+
+/// Adds period range columns and drops UNIQUE on year_month so multiple custom ranges can exist.
+fn migrate_v1_budget_months_periods(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(budget_months)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if cols.iter().any(|c| c == "period_start") {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+      PRAGMA foreign_keys = OFF;
+      BEGIN IMMEDIATE;
+      CREATE TABLE budget_months_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year_month TEXT NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO budget_months_new (id, year_month, period_start, period_end, created_at)
+      SELECT id, year_month,
+        year_month || '-01',
+        date(year_month || '-01', '+1 month', '-1 day'),
+        created_at
+      FROM budget_months;
+      DROP TABLE budget_months;
+      ALTER TABLE budget_months_new RENAME TO budget_months;
+      CREATE INDEX IF NOT EXISTS idx_budget_months_period_end ON budget_months(period_end);
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    "#,
     )?;
     Ok(())
 }

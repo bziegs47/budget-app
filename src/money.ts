@@ -37,3 +37,24 @@ export function currentYearMonth(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+
+/** First and last calendar day for YYYY-MM as ISO YYYY-MM-DD */
+export function fullMonthBoundsFromYearMonth(ym: string): { periodStart: string; periodEnd: string } {
+  const [ys, ms] = ym.split("-");
+  const y = Number(ys);
+  const m = Number(ms);
+  const start = `${ys}-${ms}-01`;
+  const last = new Date(y, m, 0).getDate();
+  const end = `${ys}-${ms}-${String(last).padStart(2, "0")}`;
+  return { periodStart: start, periodEnd: end };
+}
+
+/** Next calendar month after `periodEndIso` (YYYY-MM-DD), as full-month bounds */
+export function nextFullMonthAfterPeriodEnd(periodEndIso: string): { periodStart: string; periodEnd: string } {
+  const d = new Date(periodEndIso + "T12:00:00");
+  d.setDate(1);
+  d.setMonth(d.getMonth() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return fullMonthBoundsFromYearMonth(`${y}-${m}`);
+}
