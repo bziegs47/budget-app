@@ -25,3 +25,8 @@ src-tauri/target
 *.njsproj
 *.sln
 *.sw?
+
+# User budget data — keep private
+*.budget
+Test Budget Files/
+
