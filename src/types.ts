@@ -93,3 +93,77 @@ export type MonthRow = {
   periodEnd: string;
   tabLabel: string;
 };
+
+export type WorkspaceMeta = {
+  yearLabel: string;
+  displayName: string | null;
+  fileUuid: string;
+  schemaVersion: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExternalRenameInfo = {
+  yearLabel: string;
+  fileBasename: string;
+  isDefaultWorkspace: boolean;
+  matches: boolean;
+};
+
+export type BucketRollup = {
+  name: string;
+  plannedCents: number;
+  actualCents: number;
+  varianceCents: number;
+};
+
+export type MonthSummaryRow = {
+  monthId: number;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  incomePlannedCents: number;
+  incomeActualCents: number;
+  expenseNetPlannedCents: number;
+  expenseNetActualCents: number;
+  netPlannedCents: number;
+  netActualCents: number;
+};
+
+export type YearOverview = {
+  yearLabel: string;
+  incomePlannedCents: number;
+  incomeActualCents: number;
+  expenseNetPlannedCents: number;
+  expenseNetActualCents: number;
+  netPlannedCents: number;
+  netActualCents: number;
+  buckets: BucketRollup[];
+  months: MonthSummaryRow[];
+};
+
+export type RecentFile = {
+  path: string;
+  yearLabel: string;
+  lastOpenedAt: string;
+};
+
+export type AppSettings = {
+  defaultFolder: string | null;
+  recentFiles: RecentFile[];
+  sidebarCollapsed: boolean;
+};
+
+export type LibraryEntry = {
+  path: string;
+  yearLabel: string;
+  displayName: string | null;
+  fileUuid: string;
+  lastModified: string;
+  sizeBytes: number;
+  incomeActualCents: number;
+  expenseNetActualCents: number;
+  netActualCents: number;
+  monthCount: number;
+  encrypted: boolean;
+};

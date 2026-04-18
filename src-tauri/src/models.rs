@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,4 +114,85 @@ pub struct MonthView {
     pub expense_buckets: Vec<ExpenseBucketDto>,
     pub summary: MonthSummary,
     pub ytd: YtdTotals,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMeta {
+    pub year_label: String,
+    pub display_name: Option<String>,
+    pub file_uuid: String,
+    pub schema_version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketRollup {
+    pub name: String,
+    pub planned_cents: i64,
+    pub actual_cents: i64,
+    pub variance_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthSummaryRow {
+    pub month_id: i64,
+    pub label: String,
+    pub period_start: String,
+    pub period_end: String,
+    pub income_planned_cents: i64,
+    pub income_actual_cents: i64,
+    pub expense_net_planned_cents: i64,
+    pub expense_net_actual_cents: i64,
+    pub net_planned_cents: i64,
+    pub net_actual_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YearOverview {
+    pub year_label: String,
+    pub income_planned_cents: i64,
+    pub income_actual_cents: i64,
+    pub expense_net_planned_cents: i64,
+    pub expense_net_actual_cents: i64,
+    pub net_planned_cents: i64,
+    pub net_actual_cents: i64,
+    pub buckets: Vec<BucketRollup>,
+    pub months: Vec<MonthSummaryRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentFile {
+    pub path: String,
+    pub year_label: String,
+    pub last_opened_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AppSettings {
+    pub default_folder: Option<String>,
+    pub recent_files: Vec<RecentFile>,
+    pub sidebar_collapsed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryEntry {
+    pub path: String,
+    pub year_label: String,
+    pub display_name: Option<String>,
+    pub file_uuid: String,
+    pub last_modified: String,
+    pub size_bytes: u64,
+    pub income_actual_cents: i64,
+    pub expense_net_actual_cents: i64,
+    pub net_actual_cents: i64,
+    pub month_count: i64,
+    pub encrypted: bool,
 }

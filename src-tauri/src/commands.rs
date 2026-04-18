@@ -2,8 +2,9 @@ use crate::db;
 use crate::period;
 use chrono::Datelike;
 use crate::models::{
-    ExpenseBucketDto, ExpenseLineDto, IncomeEntryDto, IncomeLineDto, MonthRow, MonthSummary,
-    MonthView, TransactionDto, YtdTotals,
+    BucketRollup, ExpenseBucketDto, ExpenseLineDto, IncomeEntryDto, IncomeLineDto, MonthRow,
+    MonthSummary, MonthSummaryRow, MonthView, TransactionDto, WorkspaceMeta, YearOverview,
+    YtdTotals,
 };
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
@@ -985,5 +986,190 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
     }
 
     Ok(w)
+}
+
+pub fn get_workspace_meta(conn: &Connection) -> Result<WorkspaceMeta, String> {
+    conn.query_row(
+        r#"SELECT year_label, display_name, file_uuid, schema_version, created_at, updated_at
+           FROM workspace_meta WHERE id = 1"#,
+        [],
+        |r| {
+            Ok(WorkspaceMeta {
+                year_label: r.get(0)?,
+                display_name: r.get(1)?,
+                file_uuid: r.get(2)?,
+                schema_version: r.get(3)?,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        },
+    )
+    .map_err(err)
+}
+
+pub fn set_workspace_year(conn: &Connection, year_label: &str) -> Result<(), String> {
+    let trimmed = sanitize_year_label(year_label)?;
+    conn.execute(
+        "UPDATE workspace_meta SET year_label = ?1, updated_at = datetime('now') WHERE id = 1",
+        params![trimmed],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn sanitize_year_label(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("Year label cannot be empty".into());
+    }
+    // Strip filesystem-hostile characters; keep ASCII + spaces + simple punctuation.
+    let cleaned: String = trimmed
+        .chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'
+            )
+        })
+        .collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() {
+        return Err("Year label cannot be only special characters".into());
+    }
+    if cleaned.len() > 64 {
+        return Err("Year label is too long (max 64 characters)".into());
+    }
+    Ok(cleaned)
+}
+
+/// Creates Jan-Dec months for the given calendar year, skipping any that already
+/// exist (matched by full-month period bounds). Returns the resulting month ids
+/// in calendar order.
+pub fn scaffold_year(conn: &mut Connection, year: i32) -> Result<Vec<i64>, String> {
+    if !(1900..=2999).contains(&year) {
+        return Err("Year out of supported range".into());
+    }
+    let mut ids: Vec<i64> = Vec::with_capacity(12);
+    for m in 1u32..=12 {
+        let (ps, pe) = period::full_month_bounds(year, m).map_err(err)?;
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM budget_months WHERE period_start = ?1 AND period_end = ?2",
+                params![ps, pe],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(id) = existing {
+            ids.push(id);
+            continue;
+        }
+        let ym = format!("{year:04}-{:02}", m);
+        let new_id = ensure_month(conn, &ym)?;
+        ids.push(new_id);
+    }
+    Ok(ids)
+}
+
+pub fn get_year_overview(conn: &Connection) -> Result<YearOverview, String> {
+    let meta = get_workspace_meta(conn)?;
+    let months = list_months(conn)?;
+
+    let mut bucket_totals: HashMap<String, (i64, i64, i32)> = HashMap::new();
+    let mut month_rows: Vec<MonthSummaryRow> = Vec::with_capacity(months.len());
+    let mut year_income_planned = 0i64;
+    let mut year_income_actual = 0i64;
+    let mut year_expense_planned = 0i64;
+    let mut year_expense_actual = 0i64;
+
+    for m in months {
+        let view = get_month_view(conn, m.id)?;
+        year_income_planned += view.summary.income_planned_cents;
+        year_income_actual += view.summary.income_actual_cents;
+        year_expense_planned += view.summary.expense_net_planned_cents;
+        year_expense_actual += view.summary.expense_net_actual_cents;
+
+        for bucket in &view.expense_buckets {
+            let mut planned = 0i64;
+            let mut actual = 0i64;
+            for line in &bucket.lines {
+                if line.is_neutral_transfer {
+                    continue;
+                }
+                planned += line.planned_cents;
+                actual += line.actual_cents;
+            }
+            let entry = bucket_totals
+                .entry(bucket.name.clone())
+                .or_insert((0, 0, bucket.sort_order));
+            entry.0 += planned;
+            entry.1 += actual;
+        }
+
+        month_rows.push(MonthSummaryRow {
+            month_id: m.id,
+            label: m.tab_label,
+            period_start: m.period_start,
+            period_end: m.period_end,
+            income_planned_cents: view.summary.income_planned_cents,
+            income_actual_cents: view.summary.income_actual_cents,
+            expense_net_planned_cents: view.summary.expense_net_planned_cents,
+            expense_net_actual_cents: view.summary.expense_net_actual_cents,
+            net_planned_cents: view.summary.net_planned_cents,
+            net_actual_cents: view.summary.net_actual_cents,
+        });
+    }
+
+    let mut bucket_list: Vec<(String, i64, i64, i32)> = bucket_totals
+        .into_iter()
+        .map(|(name, (p, a, s))| (name, p, a, s))
+        .collect();
+    bucket_list.sort_by(|a, b| a.3.cmp(&b.3).then_with(|| a.0.cmp(&b.0)));
+    let buckets: Vec<BucketRollup> = bucket_list
+        .into_iter()
+        .map(|(name, planned, actual, _)| BucketRollup {
+            name,
+            planned_cents: planned,
+            actual_cents: actual,
+            variance_cents: planned - actual,
+        })
+        .collect();
+
+    Ok(YearOverview {
+        year_label: meta.year_label,
+        income_planned_cents: year_income_planned,
+        income_actual_cents: year_income_actual,
+        expense_net_planned_cents: year_expense_planned,
+        expense_net_actual_cents: year_expense_actual,
+        net_planned_cents: year_income_planned - year_expense_planned,
+        net_actual_cents: year_income_actual - year_expense_actual,
+        buckets,
+        months: month_rows,
+    })
+}
+
+pub fn export_workspace_json(conn: &Connection) -> Result<String, String> {
+    let meta = get_workspace_meta(conn)?;
+    let months = list_months(conn)?;
+    let mut month_views: Vec<MonthView> = Vec::with_capacity(months.len());
+    for m in &months {
+        month_views.push(get_month_view(conn, m.id)?);
+    }
+    let payload = serde_json::json!({
+        "schemaVersion": meta.schema_version,
+        "exportedAt": chrono::Utc::now().to_rfc3339(),
+        "workspace": meta,
+        "months": month_views,
+    });
+    serde_json::to_string_pretty(&payload).map_err(err)
+}
+
+pub fn rename_year_label(conn: &Connection, year_label: &str) -> Result<String, String> {
+    let cleaned = sanitize_year_label(year_label)?;
+    conn.execute(
+        "UPDATE workspace_meta SET year_label = ?1, updated_at = datetime('now') WHERE id = 1",
+        params![cleaned],
+    )
+    .map_err(err)?;
+    Ok(cleaned)
 }
 

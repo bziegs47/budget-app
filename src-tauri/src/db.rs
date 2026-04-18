@@ -87,6 +87,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         "#,
     )?;
     migrate_v1_budget_months_periods(conn)?;
+    migrate_v2_workspace_meta(conn)?;
     Ok(())
 }
 
@@ -133,4 +134,62 @@ pub fn month_id_for(conn: &Connection, year_month: &str) -> rusqlite::Result<Opt
         |r| r.get(0),
     )
     .optional()
+}
+
+/// Adds workspace_meta singleton table; auto-derives year_label from period_start values.
+fn migrate_v2_workspace_meta(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS workspace_meta (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            year_label TEXT NOT NULL DEFAULT '',
+            display_name TEXT,
+            file_uuid TEXT NOT NULL DEFAULT '',
+            schema_version INTEGER NOT NULL DEFAULT 2,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
+    )?;
+
+    let exists: i64 = conn.query_row("SELECT COUNT(*) FROM workspace_meta", [], |r| r.get(0))?;
+    if exists == 0 {
+        // Derive year_label from the most common YYYY in period_start values, if any.
+        let derived: Option<String> = conn
+            .query_row(
+                r#"
+                SELECT strftime('%Y', period_start) AS y
+                FROM budget_months
+                WHERE period_start IS NOT NULL AND period_start != ''
+                GROUP BY y
+                ORDER BY COUNT(*) DESC, y DESC
+                LIMIT 1
+                "#,
+                [],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let year_label = derived.unwrap_or_default();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO workspace_meta (id, year_label, file_uuid) VALUES (1, ?1, ?2)",
+            rusqlite::params![year_label, uuid],
+        )?;
+    } else {
+        // Backfill file_uuid for older rows that may have been created with the empty default.
+        let needs_uuid: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM workspace_meta WHERE id = 1 AND (file_uuid IS NULL OR file_uuid = '')",
+            [],
+            |r| r.get(0),
+        )?;
+        if needs_uuid > 0 {
+            let uuid = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "UPDATE workspace_meta SET file_uuid = ?1 WHERE id = 1",
+                rusqlite::params![uuid],
+            )?;
+        }
+    }
+    Ok(())
 }
