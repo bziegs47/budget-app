@@ -1905,8 +1905,21 @@ function CrossYearView({
   }
 
   const columns = data.columns;
-  const incomeRows = data.lineRows.filter((r) => r.lineKind === "income");
-  const expenseRows = data.lineRows.filter((r) => r.lineKind === "expense");
+  // Hide rows that are zero across every column. Carrying empty
+  // expense lines / unused buckets year-over-year was useful when a
+  // budget had only a year or two — it served as a "did you forget
+  // this?" reminder. With many years in one file the comparison
+  // becomes a wall of zeroes. A row earns its place only if at least
+  // one year has either a plan or actuals against it.
+  const hasAnyValue = (r: { totalPlannedCents: number; totalActualCents: number }) =>
+    r.totalPlannedCents !== 0 || r.totalActualCents !== 0;
+  const bucketRows = data.bucketRows.filter(hasAnyValue);
+  const incomeRows = data.lineRows.filter(
+    (r) => r.lineKind === "income" && hasAnyValue(r),
+  );
+  const expenseRows = data.lineRows.filter(
+    (r) => r.lineKind === "expense" && hasAnyValue(r),
+  );
 
   return (
     <div className="year-overview cross-year-view">
@@ -1975,14 +1988,12 @@ function CrossYearView({
         </div>
       </section>
 
-      <section className="card">
-        <h2>By bucket</h2>
-        {data.bucketRows.length === 0 ? (
-          <p className="muted">No expense buckets yet.</p>
-        ) : (
+      {bucketRows.length > 0 && (
+        <section className="card">
+          <h2>By bucket</h2>
           <CrossYearMatrix
             columns={columns}
-            rows={data.bucketRows.map((r) => ({
+            rows={bucketRows.map((r) => ({
               key: r.bucketName,
               label: r.bucketName,
               cells: r.cells,
@@ -1991,8 +2002,8 @@ function CrossYearView({
             }))}
             onJumpToYear={onJumpToYear}
           />
-        )}
-      </section>
+        </section>
+      )}
 
       {incomeRows.length > 0 && (
         <section className="card">
