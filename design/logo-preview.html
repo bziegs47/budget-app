@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mimo logo — preview</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
+        color: #334155;
+      }
+      .panel {
+        padding: 2rem;
+        min-height: 50vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+      }
+      .panel.light {
+        background: #f8fafc;
+      }
+      .panel.dark {
+        background: #0f172a;
+        color: #94a3b8;
+      }
+      .panel h2 {
+        margin: 0;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.8;
+      }
+      .frame {
+        padding: 2rem;
+        border-radius: 1rem;
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .panel.light .frame {
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+      }
+      .panel.dark .frame {
+        background: #1e293b;
+      }
+      svg {
+        display: block;
+        width: min(320px, 80vw);
+        height: auto;
+      }
+      p.hint {
+        max-width: 36rem;
+        margin: 0;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        text-align: center;
+      }
+      code {
+        font-size: 0.8em;
+        background: rgba(15, 23, 42, 0.06);
+        padding: 0.15em 0.4em;
+        border-radius: 0.25rem;
+      }
+      .panel.dark code {
+        background: rgba(255, 255, 255, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel light">
+      <h2>Light background</h2>
+      <div class="frame">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 256 256"
+          fill="none"
+          role="img"
+          aria-label="mimo"
+        >
+          <title>mimo</title>
+          <path
+            d="M 52 132 Q 128 88 204 132"
+            stroke="#1e293b"
+            stroke-width="14"
+            stroke-linecap="round"
+            fill="none"
+          />
+          <path
+            d="M 42 128 Q 54 112 72 118"
+            stroke="#0d9488"
+            stroke-width="4"
+            stroke-linecap="round"
+            opacity="0.9"
+            fill="none"
+          />
+          <g transform="translate(110 112)">
+            <circle r="21" stroke="#1e293b" stroke-width="3.2" fill="none" />
+            <line x1="0" y1="-12" x2="0" y2="12" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
+            <line x1="-12" y1="0" x2="12" y2="0" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
+            <circle r="5" fill="#0d9488" />
+          </g>
+          <g transform="translate(146 112)">
+            <circle r="21" stroke="#1e293b" stroke-width="3.2" fill="none" />
+            <line x1="0" y1="-12" x2="0" y2="12" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
+            <line x1="-12" y1="0" x2="12" y2="0" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
+            <circle r="5" stroke="#64748b" stroke-width="2.4" fill="none" />
+          </g>
+        </svg>
+      </div>
+      <p class="hint">
+        Edit the <code>&lt;svg&gt;</code> above, save this file, refresh the browser. Canonical asset:
+        <code>public/logo.svg</code>.
+      </p>
+    </div>
+    <div class="panel dark">
+      <h2>Dark background</h2>
+      <div class="frame">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 256 256"
+          fill="none"
+          role="img"
+          aria-label="mimo"
+        >
+          <title>mimo</title>
+          <path
+            d="M 52 132 Q 128 88 204 132"
+            stroke="#e2e8f0"
+            stroke-width="14"
+            stroke-linecap="round"
+            fill="none"
+          />
+          <path
+            d="M 42 128 Q 54 112 72 118"
+            stroke="#2dd4bf"
+            stroke-width="4"
+            stroke-linecap="round"
+            opacity="0.95"
+            fill="none"
+          />
+          <g transform="translate(110 112)">
+            <circle r="21" stroke="#e2e8f0" stroke-width="3.2" fill="none" />
+            <line x1="0" y1="-12" x2="0" y2="12" stroke="#e2e8f0" stroke-width="2.8" stroke-linecap="round" />
+            <line x1="-12" y1="0" x2="12" y2="0" stroke="#e2e8f0" stroke-width="2.8" stroke-linecap="round" />
+            <circle r="5" fill="#2dd4bf" />
+          </g>
+          <g transform="translate(146 112)">
+            <circle r="21" stroke="#e2e8f0" stroke-width="3.2" fill="none" />
+            <line x1="0" y1="-12" x2="0" y2="12" stroke="#e2e8f0" stroke-width="2.8" stroke-linecap="round" />
+            <line x1="-12" y1="0" x2="12" y2="0" stroke="#e2e8f0" stroke-width="2.8" stroke-linecap="round" />
+            <circle r="5" stroke="#94a3b8" stroke-width="2.4" fill="none" />
+          </g>
+        </svg>
+      </div>
+      <p class="hint">
+        Dark variant: lighter strokes for contrast. Copy into a separate asset if the app needs a dark-mode
+        icon.
+      </p>
+    </div>
+  </body>
+</html>
