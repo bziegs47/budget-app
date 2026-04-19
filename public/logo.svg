@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-label="mimo">
   <title>mimo</title>
+  <!-- 1. Pipe (behind money) -->
   <path
     d="M 52 132 Q 128 88 204 132"
     stroke="#1e293b"
@@ -7,24 +8,22 @@
     stroke-linecap="round"
     fill="none"
   />
-  <path
-    d="M 42 128 Q 54 112 72 118"
-    stroke="#0d9488"
-    stroke-width="4"
-    stroke-linecap="round"
-    opacity="0.9"
-    fill="none"
-  />
-  <g transform="translate(110 112)">
-    <circle r="21" stroke="#1e293b" stroke-width="3.2" fill="none" />
-    <line x1="0" y1="-12" x2="0" y2="12" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
-    <line x1="-12" y1="0" x2="12" y2="0" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
-    <circle r="5" fill="#0d9488" />
+  <!-- 2. Coin on inlet (in front of pipe) -->
+  <g transform="translate(86 106)">
+    <circle r="24" fill="#f8fafc" stroke="#1e293b" stroke-width="2.8" />
+    <circle r="17" stroke="#cbd5e1" stroke-width="1.6" fill="none" />
+    <line x1="0" y1="-8" x2="0" y2="8" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" />
+    <line x1="-5" y1="0" x2="5" y2="0" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" />
   </g>
-  <g transform="translate(146 112)">
-    <circle r="21" stroke="#1e293b" stroke-width="3.2" fill="none" />
-    <line x1="0" y1="-12" x2="0" y2="12" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
-    <line x1="-12" y1="0" x2="12" y2="0" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round" />
-    <circle r="5" stroke="#64748b" stroke-width="2.4" fill="none" />
+  <!-- 3. Bill emerging from outlet (growth / savings) -->
+  <g transform="translate(198 124) rotate(-11)">
+    <rect x="-38" y="-14" width="76" height="28" rx="4" fill="#f1f5f9" stroke="#1e293b" stroke-width="2.4" />
+    <rect x="-30" y="-8" width="60" height="16" rx="2" fill="none" stroke="#cbd5e1" stroke-width="1.2" />
+    <line x1="-22" y1="0" x2="22" y2="0" stroke="#0d9488" stroke-width="1.4" stroke-linecap="round" opacity="0.85" />
+  </g>
+  <!-- 4. Flow arrow above the pipe -->
+  <g fill="#0d9488">
+    <rect x="56" y="71.25" width="124" height="5.5" rx="2.75" />
+    <path d="M 176 66 L 192 74 L 176 82 Z" />
   </g>
 </svg>
