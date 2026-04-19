@@ -9,6 +9,31 @@ pub struct MonthRow {
     pub period_start: String,
     pub period_end: String,
     pub tab_label: String,
+    /// FK into `years.id`. Optional only because legacy data may still be in flight,
+    /// but in practice every row returned by `list_months` will have this set.
+    pub year_id: Option<i64>,
+    /// Label of the parent year (e.g. "2026"). Empty if the month is orphaned.
+    pub year_label: String,
+    /// 1-12 for clean calendar months; `None` for any leftover non-calendar
+    /// period that survived migration without snapping.
+    pub calendar_month: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YearRow {
+    pub id: i64,
+    pub year_label: String,
+    pub sort_order: i32,
+    pub month_count: i64,
+    /// Months that have at least one income entry or one non-neutral transaction.
+    /// Mirrors the "months tracked" metric shown on the year overview screen so
+    /// the sidebar/landing list reflect actual activity rather than the always-12
+    /// scaffolded count.
+    pub tracked_month_count: i64,
+    pub income_actual_cents: i64,
+    pub expense_net_actual_cents: i64,
+    pub net_actual_cents: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,7 +138,11 @@ pub struct MonthView {
     pub income_lines: Vec<IncomeLineDto>,
     pub expense_buckets: Vec<ExpenseBucketDto>,
     pub summary: MonthSummary,
+    /// YTD totals aggregated by **budget period** (which periods have closed up to this month).
     pub ytd: YtdTotals,
+    /// YTD totals aggregated by **transaction date** (`occurred_on`/`received_on`),
+    /// from Jan 1 of the calendar year through the active period end.
+    pub ytd_by_date: YtdTotals,
 }
 
 #[derive(Debug, Serialize)]
@@ -251,6 +280,73 @@ pub struct LineRef {
     pub line_identity: String,
 }
 
+/// Per-year column header in a cross-year matrix. Grouped totals live alongside
+/// the column so the frontend can render a "Year totals" footer without having
+/// to re-aggregate the per-row cells.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossYearColumn {
+    pub year_id: i64,
+    pub year_label: String,
+    pub income_planned_cents: i64,
+    pub income_actual_cents: i64,
+    pub expense_planned_cents: i64,
+    pub expense_actual_cents: i64,
+    pub net_planned_cents: i64,
+    pub net_actual_cents: i64,
+    /// Months with at least one income entry or one non-neutral transaction.
+    /// Mirrors the same definition `list_years` and the year-overview header
+    /// already use, so the cross-year view never disagrees with them.
+    pub tracked_month_count: i64,
+}
+
+/// One cell of a cross-year matrix. Both values are `0` when the row didn't
+/// touch that year — the frontend uses that to render an em-dash placeholder.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossYearCell {
+    pub planned_cents: i64,
+    pub actual_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossYearBucketRow {
+    pub bucket_name: String,
+    /// Aligned 1-to-1 with the parent `CrossYearOverview.columns`.
+    pub cells: Vec<CrossYearCell>,
+    pub total_planned_cents: i64,
+    pub total_actual_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossYearLineRow {
+    /// `"income"` or `"expense"`
+    pub line_kind: String,
+    pub line_identity: String,
+    pub display_name: String,
+    /// Only set for expense lines, sourced from the latest period that contains
+    /// the line (informational; see `list_workspace_line_catalog`).
+    pub bucket_name: Option<String>,
+    /// Aligned 1-to-1 with the parent `CrossYearOverview.columns`.
+    pub cells: Vec<CrossYearCell>,
+    pub total_planned_cents: i64,
+    pub total_actual_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossYearOverview {
+    pub columns: Vec<CrossYearColumn>,
+    /// Expense buckets, grouped by name across years, sorted by display name.
+    pub bucket_rows: Vec<CrossYearBucketRow>,
+    /// Income + expense lines grouped by `line_identity`. Income rows come
+    /// first, then expense rows; both sections are alphabetised within
+    /// themselves so the matrix reads top-down naturally.
+    pub line_rows: Vec<CrossYearLineRow>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
@@ -265,4 +361,32 @@ pub struct LibraryEntry {
     pub net_actual_cents: i64,
     pub month_count: i64,
     pub encrypted: bool,
+    /// Cloud provider derived from the path prefix (e.g. "iCloud Drive",
+    /// "Google Drive"). `None` when the file lives in a local-only folder.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// `true` when the basename matches a cloud-sync conflict pattern
+    /// (e.g. `Foo (conflicted copy 2024-...).mimo`). Pure path heuristic.
+    #[serde(default)]
+    pub is_conflict_copy: bool,
+    /// `workspace_meta.updated_at` snapshot. Distinct from the file mtime
+    /// because cloud syncs can touch the file without the user editing it.
+    #[serde(default)]
+    pub last_edited_at: Option<String>,
+}
+
+/// Probe result for a well-known cloud-storage folder. Used by the
+/// Preferences > General "detect cloud folders" UI so the user can adopt
+/// one with a single click without manually picking a directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudFolderProbe {
+    pub provider: String,
+    pub path: String,
+    pub exists: bool,
+    pub is_default: bool,
+    /// Number of `.mimo`/`.budget` files visible in the candidate folder
+    /// (one-level scan). Helps the user pick the folder that already has
+    /// their data when several providers are installed.
+    pub workspace_count: i64,
 }

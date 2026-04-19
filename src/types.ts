@@ -83,7 +83,10 @@ export type MonthView = {
   incomeLines: IncomeLineDto[];
   expenseBuckets: ExpenseBucketDto[];
   summary: MonthSummary;
+  /** YTD aggregated by budget period (which periods have closed up to this month). */
   ytd: YtdTotals;
+  /** YTD aggregated by transaction date (occurredOn / receivedOn) within the calendar year. */
+  ytdByDate: YtdTotals;
 };
 
 export type MonthRow = {
@@ -92,6 +95,29 @@ export type MonthRow = {
   periodStart: string;
   periodEnd: string;
   tabLabel: string;
+  yearId: number | null;
+  yearLabel: string;
+  /** 1-12 for clean calendar months; null for any leftover non-calendar period. */
+  calendarMonth: number | null;
+};
+
+export type YearRow = {
+  id: number;
+  yearLabel: string;
+  sortOrder: number;
+  /** Total scaffolded months for the year (always 12 once auto-scaffold runs). */
+  monthCount: number;
+  /** Months with at least one income entry or non-neutral transaction. */
+  trackedMonthCount: number;
+  incomeActualCents: number;
+  expenseNetActualCents: number;
+  netActualCents: number;
+};
+
+export type DuplicateYearArgs = {
+  destYearLabel: string;
+  mode: "perMonth" | "singleSource";
+  sourceMonthId?: number;
 };
 
 export type WorkspaceMeta = {
@@ -166,6 +192,17 @@ export type LibraryEntry = {
   netActualCents: number;
   monthCount: number;
   encrypted: boolean;
+  provider?: string | null;
+  isConflictCopy?: boolean;
+  lastEditedAt?: string | null;
+};
+
+export type CloudFolderProbe = {
+  provider: string;
+  path: string;
+  exists: boolean;
+  isDefault: boolean;
+  workspaceCount: number;
 };
 
 export type WorkspaceLineCatalogEntry = {
@@ -224,4 +261,44 @@ export type ReportsViewSeed = {
   year: number;
   asOf: string | null;
   selected: LineRef[];
+};
+
+export type CrossYearColumn = {
+  yearId: number;
+  yearLabel: string;
+  incomePlannedCents: number;
+  incomeActualCents: number;
+  expensePlannedCents: number;
+  expenseActualCents: number;
+  netPlannedCents: number;
+  netActualCents: number;
+  trackedMonthCount: number;
+};
+
+export type CrossYearCell = {
+  plannedCents: number;
+  actualCents: number;
+};
+
+export type CrossYearBucketRow = {
+  bucketName: string;
+  cells: CrossYearCell[];
+  totalPlannedCents: number;
+  totalActualCents: number;
+};
+
+export type CrossYearLineRow = {
+  lineKind: "income" | "expense";
+  lineIdentity: string;
+  displayName: string;
+  bucketName: string | null;
+  cells: CrossYearCell[];
+  totalPlannedCents: number;
+  totalActualCents: number;
+};
+
+export type CrossYearOverview = {
+  columns: CrossYearColumn[];
+  bucketRows: CrossYearBucketRow[];
+  lineRows: CrossYearLineRow[];
 };

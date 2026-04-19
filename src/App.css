@@ -50,15 +50,23 @@ body {
 
 .brand {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 650;
-  letter-spacing: 0.02em;
+  align-items: baseline;
+  gap: 0.55rem;
   margin-right: 0.5rem;
 }
 
 .brand-mark {
   color: var(--accent);
+  font-size: 1.5rem;
+  line-height: 1;
+  align-self: center;
+}
+
+.brand-name {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1;
 }
 
 .field-inline {
@@ -279,8 +287,19 @@ body {
 
 .summary-cols {
   display: grid;
-  grid-template-columns: repeat(3, minmax(7rem, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem 1rem;
+  min-width: 0;
+}
+
+.summary-cols > div {
+  min-width: 0;
+}
+
+.summary-cols .num {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mini-label {
@@ -669,12 +688,6 @@ body {
   color: var(--danger);
 }
 
-.footer {
-  margin-top: 2rem;
-  font-size: 0.78rem;
-  word-break: break-all;
-}
-
 .bucket-card h2 {
   color: #cbd5e8;
 }
@@ -744,6 +757,29 @@ body {
   font-size: 0.78rem;
   color: var(--muted);
   line-height: 1.35;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.modal-field > .label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Inline validation message — kept small so it never looks like a second
+   dialog popping over the modal it belongs to. */
+.modal-error {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #f87171;
 }
 
 .top-bar-spacer {
@@ -920,80 +956,148 @@ body {
   top: 0;
   align-self: start;
   height: 100vh;
-  overflow-y: auto;
-  padding: 0.85rem 0.85rem 1.25rem;
+  padding: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: visible; /* allow the edge tab to spill onto main content */
+}
+
+.sidebar.collapsed {
+  padding: 0;
+}
+
+.sidebar-header {
+  flex: 0 0 auto;
+  padding: 0.85rem 0.85rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 1.5rem;
+}
+
+.sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.85rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
 }
 
-.sidebar.collapsed {
-  padding: 0.5rem 0.25rem;
-  align-items: center;
-}
-
-.sidebar-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.sidebar-top-links {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.sidebar-library-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.35rem 0.55rem;
-  cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-}
-
-.sidebar-library-link:hover,
-.sidebar-library-link:focus-visible {
-  background: var(--surface-2);
-  border-color: var(--border);
-  outline: none;
-}
-
-.sidebar-library-link[aria-pressed="true"] {
-  background: rgba(91, 140, 255, 0.12);
-  border-color: rgba(91, 140, 255, 0.35);
-  color: var(--accent);
-}
-
-.sidebar-collapse-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--muted);
-  cursor: pointer;
+/* Edge tab: visually attached to the right border of the sidebar so it reads
+   as a tab on the divider rather than a free-floating button. */
+.sidebar-collapse-tab {
+  position: absolute;
+  top: 18px;
+  right: -13px;
+  width: 26px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.95rem;
   line-height: 1;
+  padding: 0;
+  z-index: 10;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.sidebar-collapse-btn:hover {
+.sidebar-collapse-tab:hover,
+.sidebar-collapse-tab:focus-visible {
+  background: var(--surface-2);
   color: var(--text);
+  outline: none;
+}
+
+.sidebar.collapsed .sidebar-collapse-tab {
+  /* Keep tab in a comfortable spot when sidebar is the narrow rail */
+  top: 18px;
+}
+
+.sidebar-eyebrow {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 0.3rem 0.4rem;
+}
+
+/* Workspace identification chip at the very top of the sidebar. Reads as
+   the "you opened: ___" label and stays visually subordinate to the section
+   titles below so navigation still leads the eye. The bottom border acts as
+   a page break separating workspace identity from in-workspace navigation. */
+.sidebar-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.1rem 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.9rem;
+}
+
+.sidebar-workspace-eyebrow {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.sidebar-workspace-title {
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.sidebar-workspace.is-placeholder .sidebar-workspace-title {
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* The "Years" tree-root label sits beneath the workspace chip + page break.
+   Reset its top margin so the chip's `margin-bottom` controls the gap below
+   the page break rather than stacking another margin on top. */
+.sidebar-eyebrow-title {
+  margin-top: 0;
+}
+
+.sidebar-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.sidebar-back:hover,
+.sidebar-back:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+  outline: none;
 }
 
 .sidebar-year {
@@ -1027,16 +1131,23 @@ body {
   min-width: 0;
 }
 
+/* "YEAR" header above the year value — reads as the primary location label
+   ("you are here"), so it gets the same prominent blue treatment as the
+   "Months" section title below the divider. */
 .sidebar-year-eyebrow {
-  font-size: 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  letter-spacing: 0.09em;
+  color: #8aaaff;
 }
 
 .sidebar-year-label {
   font-weight: 650;
   font-size: 1rem;
+  /* Mirror the indent of `.sidebar-month-list.nested` so the year value reads
+     as a child of the "YEAR" header, matching the Month name → Months pattern. */
+  padding-left: 0.65rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1092,6 +1203,17 @@ body {
   gap: 0.35rem;
 }
 
+/* Soft "page break" between the year identity (Year / 2026) and the working
+   navigation (Year overview, Months, Custom periods). A single hairline rule
+   reads as a divider without adding visual weight. */
+.sidebar-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.65rem 0.25rem;
+  height: 0;
+  opacity: 0.7;
+}
+
 .sidebar-section-header {
   display: flex;
   align-items: center;
@@ -1103,6 +1225,27 @@ body {
   padding: 0 0.25rem;
 }
 
+/* Section title for groups inside the sidebar (e.g. "Months", "Custom periods").
+   Uses the app's accent blue (slightly lifted) so the group reads as a real
+   header that ties into the brand instead of fading into the muted eyebrows. */
+.sidebar-section-title {
+  margin: 0.75rem 0 0.25rem;
+  padding: 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: #8aaaff; /* Lighter sibling of var(--accent) — visible on the dark
+                     surface without competing with primary text. */
+}
+
+.sidebar-section-title.subtle {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+}
+
 .sidebar-month-list {
   list-style: none;
   margin: 0;
@@ -1110,6 +1253,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Visually nest items beneath their section title. Indent applies only to
+   the rows themselves; the active highlight still spans nicely thanks to the
+   row's own border-radius. */
+.sidebar-month-list.nested {
+  padding-left: 0.65rem;
 }
 
 .sidebar-empty {
@@ -1212,24 +1362,24 @@ body {
   padding-bottom: 0.85rem;
 }
 
-.sidebar-toggle-btn {
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.brand-year {
-  margin-left: 0.4rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+.brand-tagline {
+  margin-left: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    #8e7bff 45%,
+    #6ad0c6 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  align-self: center;
 }
 
 .app-content {
@@ -1359,6 +1509,77 @@ body {
   word-break: break-all;
 }
 
+/* Years landing (shown when sidebar shows year list and no year is open) */
+.years-landing {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 0.5rem;
+}
+
+.years-landing-head h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.years-landing-head p {
+  margin: 0.25rem 0 0;
+}
+
+.years-landing-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.years-landing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-align: left;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.years-landing-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.years-landing-card.add {
+  border-style: dashed;
+  background: transparent;
+}
+
+.years-landing-card-year {
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.years-landing-card-meta {
+  font-size: 0.8rem;
+}
+
+.years-landing-card-totals {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Library view */
 .library-view {
   display: flex;
@@ -1400,8 +1621,11 @@ body {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* Tiles are clearly delineated by their own borders, so they can sit
+     almost flush. A hairline gap still keeps focus rings & hover transforms
+     from clipping into neighbors. */
+  gap: 0.25rem;
 }
 
 .library-card {
@@ -1440,6 +1664,41 @@ body {
   color: var(--muted);
 }
 
+.library-card-badges {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.library-card-badge {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.library-card-badge.provider {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+
+.library-card-badge.conflict {
+  color: #b8413a;
+  border-color: #d18a85;
+  background: color-mix(in srgb, #d18a85 12%, var(--surface-2));
+}
+
+.library-card.is-conflict {
+  border-color: #d18a85;
+}
+
 .library-card-meta {
   font-size: 0.78rem;
 }
@@ -1462,11 +1721,6 @@ body {
   letter-spacing: 0.08em;
   color: var(--muted);
   margin-bottom: 0.15rem;
-}
-
-.library-card-path {
-  font-size: 0.7rem;
-  word-break: break-all;
 }
 
 /* Year overview */
@@ -1492,7 +1746,7 @@ body {
 
 .overview-totals {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 0.85rem;
 }
 
@@ -1501,6 +1755,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.85rem 1rem;
+  min-width: 0;
+  container-type: inline-size;
 }
 
 .overview-total-label {
@@ -1514,19 +1770,270 @@ body {
 .overview-total-cols {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.6rem 0.75rem;
+}
+
+.overview-total-cols > div {
+  min-width: 0;
 }
 
 .overview-total-cols .num {
-  font-size: 1.05rem;
+  font-size: clamp(0.9rem, 2.4cqi, 1.05rem);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 320px) {
+  .overview-total-cols {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .overview-total-cols .num {
+    font-size: 0.9rem;
+  }
+}
+
+@container (max-width: 240px) {
+  .overview-total-cols {
+    grid-template-columns: 1fr;
+  }
+  .overview-total-cols .mini-label {
+    display: inline-block;
+    margin-right: 0.4rem;
+  }
+}
+
+/* Year-end nudge banner: shown in Nov/Dec on year landing + per-year
+   overview screens when the next calendar year hasn't been scaffolded
+   yet. Soft accent + clear CTA so it reads as a helpful suggestion, not
+   an error. */
+.year-end-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+
+.year-end-nudge-text {
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
+.year-end-nudge-text strong {
+  font-weight: 700;
+}
+
+/* Cross-year view: matrix of years for at-a-glance comparison. The totals
+   row mirrors the per-year overview cards above so the visual rhythm stays
+   familiar; the matrices below scroll horizontally on narrow windows so
+   wide multi-year workspaces don't blow out the layout. */
+.cross-year-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cross-year-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.cross-year-total-card {
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.cross-year-total-card:hover {
+  border-color: var(--accent);
+  background: var(--surface-3, var(--surface-2));
+}
+
+.cross-year-total-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.cross-year-total-label {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.cross-year-total-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cross-year-total-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.cross-year-total-stats dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.cross-year-total-stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cross-year-delta {
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.cross-year-matrix-wrap {
+  overflow-x: auto;
+}
+
+.cross-year-matrix {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cross-year-row-head {
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  padding-right: 0.75rem;
+}
+
+.cross-year-row-label {
+  font-weight: 600;
+}
+
+.cross-year-row-sub {
+  font-size: 0.75rem;
+}
+
+.cross-year-cell-meta {
+  font-size: 0.72rem;
+}
+
+.cross-year-row-total {
+  font-weight: 650;
+  border-left: 1px solid var(--border);
+}
+
+.cross-year-col-link {
+  font-weight: 650;
 }
 
 /* Month view header */
+.month-view-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
 .month-view-header h1 {
-  margin: 0 0 0.25rem;
+  margin: 0;
   font-size: 1.4rem;
+}
+
+.month-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Split button: a primary action plus a caret that opens a small choice
+   menu. Used by the export controls so the redacted variant lives one click
+   deeper without crowding the toolbar. */
+.export-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.export-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: 0;
+}
+
+.export-split-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.export-split-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  z-index: 40;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #161823);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 0.25rem;
+}
+
+.export-split-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.45rem 0.6rem;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.export-split-item:hover,
+.export-split-item:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.export-split-item-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.export-split-item-help {
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 /* Btn ghost variant used in top bar */
@@ -1684,6 +2191,24 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.reports-combined-split {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.reports-combined-split .reports-combined-total {
+  margin-bottom: 0;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ytd-value.pos { color: var(--accent-2); }
+.ytd-value.neg { color: var(--danger); }
+
 .reports-combined-chart {
   margin-bottom: 1rem;
 }
@@ -1699,6 +2224,265 @@ body {
   width: 2rem;
 }
 
+/* ---------------------------------------------------------------- */
+/* Dual YTD strip (period vs. transaction-date)                     */
+/* ---------------------------------------------------------------- */
+
+.ytd-dual {
+  position: relative;
+  padding: 0.9rem 1.1rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+}
+
+.ytd-dual-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.ytd-dual-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.ytd-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.ytd-info-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.ytd-info-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 1rem;
+  right: 1rem;
+  z-index: 30;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.35);
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.ytd-info-popover strong {
+  color: var(--text);
+}
+
+.ytd-dual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.ytd-single .ytd-dual-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ytd-dual-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.ytd-dual-cardhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ytd-dual-kind {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ytd-dual-thru {
+  font-size: 0.78rem;
+}
+
+.ytd-dual-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+
+.ytd-dual-stats > div {
+  min-width: 0;
+}
+
+.ytd-dual-stats .ytd-label {
+  font-size: 0.7rem;
+}
+
+.ytd-dual-stats .ytd-value {
+  font-size: clamp(0.9rem, 2.4cqi, 1.05rem);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 320px) {
+  .ytd-dual-stats {
+    grid-template-columns: 1fr;
+  }
+  .ytd-dual-stats .ytd-label {
+    display: inline-block;
+    margin-right: 0.4rem;
+  }
+}
+
+@media (max-width: 760px) {
+  .ytd-dual-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reports-combined-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Save status pill (top bar)                                       */
+/* ---------------------------------------------------------------- */
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-pill.ok {
+  color: var(--accent-2);
+  border-color: rgba(62, 207, 142, 0.4);
+  background: rgba(62, 207, 142, 0.1);
+}
+
+.status-pill.warn {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.status-pill.muted-pill {
+  color: var(--muted);
+}
+
+.status-pill.clickable {
+  cursor: pointer;
+}
+
+.status-pill.clickable:hover {
+  filter: brightness(1.1);
+}
+
+.status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+.status-dot.ok {
+  background: var(--accent-2);
+  box-shadow: 0 0 0 0 rgba(62, 207, 142, 0.5);
+}
+
+.status-dot.busy {
+  background: var(--accent);
+  animation: status-dot-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes status-dot-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ---------------------------------------------------------------- */
+/* Expense-line edit modal (add / rename + flags)                   */
+/* ---------------------------------------------------------------- */
+
+.line-edit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.line-edit-toggle {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 0.5rem 0.65rem;
+  align-items: start;
+  padding: 0.65rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.line-edit-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.line-edit-toggle-label {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.line-edit-toggle-hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 /* Responsive: collapse sidebar grid on narrow screens */
 @media (max-width: 760px) {
   .app-layout {
@@ -1711,4 +2495,269 @@ body {
   .sidebar-month-label {
     max-width: 120px;
   }
+}
+
+/* ─── Preferences modal ─────────────────────────────────────────────────── */
+.preferences-card {
+  max-width: 44rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: min(80vh, 640px);
+}
+
+.preferences-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.preferences-header .modal-title {
+  margin: 0;
+}
+
+.preferences-close {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.preferences-body {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.preferences-nav {
+  border-right: 1px solid var(--border);
+  padding: 0.75rem 0.5rem;
+  overflow-y: auto;
+}
+
+.preferences-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.preferences-nav-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.preferences-nav-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.preferences-nav-item.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+}
+
+.preferences-panel {
+  padding: 1rem 1.25rem 1.25rem;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.preferences-panel-head {
+  margin-bottom: 1rem;
+}
+
+.preferences-panel-head h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.preferences-panel-head p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.preferences-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.preferences-field:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.preferences-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.preferences-help {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.preferences-folder-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.preferences-folder-input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.preferences-status {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.preferences-status code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+/* Cloud-folder discovery: list of detected providers with adopt/migrate
+   actions. Each row reads top-down (provider, path, count) so the user
+   can scan quickly and pick the right account when several are present. */
+.preferences-cloud-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.preferences-cloud-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.preferences-cloud-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-2);
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.preferences-cloud-row.is-default {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+}
+
+.preferences-cloud-row.is-missing {
+  opacity: 0.6;
+}
+
+.preferences-cloud-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.preferences-cloud-provider {
+  font-weight: 650;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.preferences-cloud-tag {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.preferences-cloud-path {
+  font-size: 0.78rem;
+  word-break: break-all;
+  color: var(--muted);
+}
+
+.preferences-cloud-meta {
+  font-size: 0.72rem;
+}
+
+.preferences-cloud-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Diagnostics: read-only metadata about the active workspace, hidden behind a
+   disclosure button so it doesn't add visual noise for typical usage. */
+.preferences-diagnostics {
+  gap: 0.5rem;
+}
+
+.preferences-diagnostics-toggle {
+  align-self: flex-start;
+  font-size: 0.78rem;
+}
+
+.preferences-diagnostics-list {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  column-gap: 1rem;
+  row-gap: 0.35rem;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.preferences-diagnostics-list dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.preferences-diagnostics-list dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.preferences-diagnostics-list code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.74rem;
+  word-break: break-all;
+}
+
+.preferences-actions {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 1.25rem;
+  margin-top: 0;
 }

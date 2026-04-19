@@ -1,8 +1,14 @@
-# Budget
+# mimo
 
-Local-first desktop budget app (Tauri 2 + React + SQLite). USD amounts are stored as integer cents; the main grid uses rounded dollars and line detail shows exact cents.
+**mimo** — Money In, Money Out. A local-first desktop budget app (Tauri 2 + React + SQLite) for macOS.
+
+USD amounts are stored as integer cents. The main grid shows rounded dollars and line detail shows exact cents.
 
 **Repository:** [github.com/bziegs47/budget-app](https://github.com/bziegs47/budget-app)
+
+## Files
+
+mimo workspaces are saved as `.mimo` files (each file holds one or more years). Older `.budget` files are still openable for backward compatibility. By default they live in `~/Documents/Budget/` — you can change the default folder in app settings.
 
 ## Git workflow
 
@@ -34,10 +40,10 @@ Or restart the terminal / Cursor so `~/.cargo/bin` is loaded, then confirm with 
 npm run tauri build
 ```
 
-## Data
+## Internal data
 
-The SQLite database lives under your OS app data directory, e.g. on macOS:
+Default scratch workspace and app metadata live under your OS app data directory, e.g. on macOS:
 
-`~/Library/Application Support/com.bziegs.budget-app/budget.sqlite3`
+`~/Library/Application Support/com.bziegs.mimo/budget.sqlite3`
 
 The app footer shows the resolved path at runtime.

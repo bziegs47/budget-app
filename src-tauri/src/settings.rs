@@ -7,7 +7,7 @@
 //!   workspaces - Phase 3 - can show their last-known summary while locked).
 
 use crate::db;
-use crate::models::{AppSettings, LibraryEntry, RecentFile};
+use crate::models::{AppSettings, CloudFolderProbe, LibraryEntry, RecentFile};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -155,11 +155,16 @@ pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
     let size_bytes = metadata.len();
 
     let conn = db::open_at_path(&canonical).map_err(|e| e.to_string())?;
-    let (year_label, display_name, file_uuid): (String, Option<String>, String) = conn
+    let (year_label, display_name, file_uuid, last_edited_at): (
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+    ) = conn
         .query_row(
-            "SELECT year_label, display_name, file_uuid FROM workspace_meta WHERE id = 1",
+            "SELECT year_label, display_name, file_uuid, updated_at FROM workspace_meta WHERE id = 1",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map_err(|e| e.to_string())?;
     let income_actual: i64 = conn
@@ -197,23 +202,211 @@ pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
         net_actual_cents: income_actual - expense_net_actual,
         month_count,
         encrypted: false,
+        provider: detect_provider(&canonical),
+        is_conflict_copy: is_conflict_copy_path(&canonical),
+        last_edited_at,
     })
+}
+
+/// Heuristic for cloud-sync conflict copies. Each provider names them
+/// differently so we match on the patterns we've seen in the wild rather
+/// than try to be exhaustive: false positives are far worse than misses
+/// because they shame normal filenames.
+pub fn is_conflict_copy_path(path: &Path) -> bool {
+    let name = match path.file_stem().and_then(|s| s.to_str()) {
+        Some(n) => n.to_lowercase(),
+        None => return false,
+    };
+    if name.contains("(conflicted copy") {
+        return true; // Dropbox + iCloud
+    }
+    if name.contains("-conflict-") || name.contains(" conflict ") {
+        return true; // OneDrive
+    }
+    if name.contains("'s conflicted copy") {
+        return true; // Box
+    }
+    false
+}
+
+/// Maps a path to a known cloud-storage provider by prefix-matching the
+/// well-known macOS mount points. Pure path heuristic - no API calls or
+/// filesystem probes beyond what the caller already needed.
+pub fn detect_provider(path: &Path) -> Option<String> {
+    let s = path.to_string_lossy();
+    let lower = s.to_lowercase();
+    if lower.contains("/library/mobile documents/com~apple~clouddocs") {
+        return Some("iCloud Drive".into());
+    }
+    if lower.contains("/library/cloudstorage/googledrive") {
+        return Some("Google Drive".into());
+    }
+    if lower.contains("/library/cloudstorage/dropbox") {
+        return Some("Dropbox".into());
+    }
+    if lower.contains("/library/cloudstorage/onedrive") {
+        return Some("OneDrive".into());
+    }
+    if lower.contains("/library/cloudstorage/box") {
+        return Some("Box".into());
+    }
+    None
+}
+
+/// Probes the filesystem for the well-known cloud-storage roots and
+/// returns the candidate Budget folders within them. Folders that don't
+/// exist are still returned (with `exists = false`) so the UI can show
+/// "iCloud Drive isn't set up yet" without making the user wonder why a
+/// provider they expected is missing - except for `CloudStorage` siblings
+/// which are listed only when present (one entry per installed account).
+pub fn probe_cloud_folders(app: &tauri::AppHandle) -> Result<Vec<CloudFolderProbe>, String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut out: Vec<CloudFolderProbe> = Vec::new();
+    let current_default = load_settings(app)
+        .ok()
+        .and_then(|s| s.default_folder)
+        .map(|p| canonicalize_or_self(Path::new(&p)));
+
+    let push = |out: &mut Vec<CloudFolderProbe>, provider: &str, candidate: PathBuf| {
+        let exists = candidate.is_dir();
+        let canonical = canonicalize_or_self(&candidate);
+        let is_default = current_default
+            .as_ref()
+            .map(|d| d == &canonical)
+            .unwrap_or(false);
+        let workspace_count = if exists {
+            count_workspaces_shallow(&candidate)
+        } else {
+            0
+        };
+        out.push(CloudFolderProbe {
+            provider: provider.to_string(),
+            path: candidate.to_string_lossy().into_owned(),
+            exists,
+            is_default,
+            workspace_count,
+        });
+    };
+
+    if let Some(h) = home.as_ref() {
+        push(
+            &mut out,
+            "iCloud Drive",
+            h.join("Library/Mobile Documents/com~apple~CloudDocs/Budget"),
+        );
+
+        let cloud = h.join("Library/CloudStorage");
+        if let Ok(read) = fs::read_dir(&cloud) {
+            for dirent in read.flatten() {
+                let name = dirent.file_name().to_string_lossy().to_string();
+                let provider = if name.starts_with("GoogleDrive-") {
+                    Some("Google Drive")
+                } else if name.starts_with("Dropbox") {
+                    Some("Dropbox")
+                } else if name.starts_with("OneDrive-") || name == "OneDrive" {
+                    Some("OneDrive")
+                } else if name.starts_with("Box-") || name == "Box" {
+                    Some("Box")
+                } else {
+                    None
+                };
+                if let Some(p) = provider {
+                    let root = dirent.path();
+                    let candidates = if p == "Google Drive" {
+                        vec![root.join("My Drive/Budget"), root.join("Budget")]
+                    } else {
+                        vec![root.join("Budget")]
+                    };
+                    for c in candidates {
+                        push(&mut out, p, c);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn count_workspaces_shallow(folder: &Path) -> i64 {
+    let mut n: i64 = 0;
+    if let Ok(read) = fs::read_dir(folder) {
+        for dirent in read.flatten() {
+            let p = dirent.path();
+            if p.is_file() && matches_budget_extension(&p) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// Copies every `.mimo`/`.budget` (and a one-level `autosaves/` sibling)
+/// from `source` into `dest` without deleting anything. Returns the count
+/// of files actually copied so the UI can show a confirmation. We never
+/// overwrite existing destinations - the user can resolve duplicates by
+/// hand, since the alternative risks losing a divergent edit.
+pub fn migrate_default_folder(source: &Path, dest: &Path) -> Result<i64, String> {
+    if !source.is_dir() {
+        return Ok(0);
+    }
+    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    let mut copied: i64 = 0;
+    let canonical_source = canonicalize_or_self(source);
+    let canonical_dest = canonicalize_or_self(dest);
+    if canonical_source == canonical_dest {
+        return Ok(0);
+    }
+    if let Ok(read) = fs::read_dir(source) {
+        for dirent in read.flatten() {
+            let p = dirent.path();
+            if !p.is_file() || !matches_budget_extension(&p) {
+                continue;
+            }
+            let name = match p.file_name() {
+                Some(n) => n,
+                None => continue,
+            };
+            let target = dest.join(name);
+            if target.exists() {
+                continue;
+            }
+            fs::copy(&p, &target).map_err(|e| e.to_string())?;
+            copied += 1;
+        }
+    }
+    Ok(copied)
 }
 
 /// Walks the default folder for `.budget` files and rebuilds the cached library.
 /// Subdirectories are scanned shallowly (one level) so users can group years.
+///
+/// Encrypted files (which can't be probed without the password) are kept
+/// in the index using their last-known cached metadata, with `encrypted`
+/// flipped to `true` so the UI can show the lock badge and skip the
+/// totals row. If we've never seen the file unlocked, a stub entry is
+/// emitted with the filename so it still shows up in the library.
 pub fn scan_library(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> {
     let folder = ensure_default_folder(app)?;
+    let cached = load_library_index(app).unwrap_or_default();
     let mut entries: Vec<LibraryEntry> = Vec::new();
+    let mut visit = |path: PathBuf| {
+        if !matches_budget_extension(&path) {
+            return;
+        }
+        if db::is_encrypted_at_path(&path) {
+            entries.push(encrypted_entry(&path, &cached));
+            return;
+        }
+        if let Ok(e) = read_library_entry(&path) {
+            entries.push(e);
+        }
+    };
     if let Ok(read) = fs::read_dir(&folder) {
         for dirent in read.flatten() {
             let p = dirent.path();
             if p.is_file() {
-                if matches_budget_extension(&p) {
-                    if let Ok(e) = read_library_entry(&p) {
-                        entries.push(e);
-                    }
-                }
+                visit(p);
             } else if p.is_dir() {
                 if p.file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -225,10 +418,8 @@ pub fn scan_library(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String>
                 if let Ok(read2) = fs::read_dir(&p) {
                     for sub in read2.flatten() {
                         let sp = sub.path();
-                        if sp.is_file() && matches_budget_extension(&sp) {
-                            if let Ok(e) = read_library_entry(&sp) {
-                                entries.push(e);
-                            }
+                        if sp.is_file() {
+                            visit(sp);
                         }
                     }
                 }
@@ -238,6 +429,52 @@ pub fn scan_library(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String>
     entries.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     save_library_index(app, &entries)?;
     Ok(entries)
+}
+
+fn encrypted_entry(path: &Path, cached: &[LibraryEntry]) -> LibraryEntry {
+    let canonical = canonicalize_or_self(path);
+    let metadata = fs::metadata(&canonical).ok();
+    let last_modified = metadata
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .map(|t| chrono::DateTime::<Utc>::from(t).to_rfc3339())
+        .unwrap_or_else(|| Utc::now().to_rfc3339());
+    let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+    let provider = detect_provider(&canonical);
+    let is_conflict_copy = is_conflict_copy_path(&canonical);
+    let prior = cached
+        .iter()
+        .find(|e| same_path(&e.path, &canonical.to_string_lossy()));
+    if let Some(p) = prior {
+        let mut next = p.clone();
+        next.last_modified = last_modified;
+        next.size_bytes = size_bytes;
+        next.encrypted = true;
+        next.provider = provider;
+        next.is_conflict_copy = is_conflict_copy;
+        return next;
+    }
+    let stub_label = canonical
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Locked workspace")
+        .to_string();
+    LibraryEntry {
+        path: canonical.to_string_lossy().into_owned(),
+        year_label: stub_label,
+        display_name: None,
+        file_uuid: String::new(),
+        last_modified,
+        size_bytes,
+        income_actual_cents: 0,
+        expense_net_actual_cents: 0,
+        net_actual_cents: 0,
+        month_count: 0,
+        encrypted: true,
+        provider,
+        is_conflict_copy,
+        last_edited_at: None,
+    }
 }
 
 /// Updates (or inserts) a single library entry by re-probing the file. Cheaper
@@ -264,7 +501,7 @@ pub fn forget_library_entry(app: &tauri::AppHandle, path: &Path) -> Result<(), S
 fn matches_budget_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|s| s.eq_ignore_ascii_case("budget"))
+        .map(|s| s.eq_ignore_ascii_case("mimo") || s.eq_ignore_ascii_case("budget"))
         .unwrap_or(false)
 }
 

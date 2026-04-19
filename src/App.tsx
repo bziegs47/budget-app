@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -6,17 +14,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   centsToInputString,
-  currentYearMonth,
   formatUsd,
-  fullMonthBoundsFromYearMonth,
-  nextFullMonthAfterPeriodEnd,
   parseMoneyToCents,
 } from "./money";
 import type {
   AppSettings,
+  CloudFolderProbe,
+  CrossYearOverview,
+  DuplicateYearArgs,
   ExpenseBucketDto,
   ExpenseLineDto,
-  ExternalRenameInfo,
   IncomeLineDto,
   LibraryEntry,
   LineCalendarReport,
@@ -29,8 +36,32 @@ import type {
   WorkspaceLineCatalogEntry,
   WorkspaceMeta,
   YearOverview,
+  YearRow,
 } from "./types";
 import "./App.css";
+
+const MONTH_NAMES_FULL = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+function basenameNoExt(path: string): string {
+  if (!path) return "";
+  const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const file = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+  const dot = file.lastIndexOf(".");
+  return dot > 0 ? file.slice(0, dot) : file;
+}
 
 type IconProps = { size?: number; className?: string };
 
@@ -162,6 +193,76 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function relativeTimeShort(ms: number): string {
+  const sec = Math.max(0, Math.round(ms / 1000));
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  return `${day}d ago`;
+}
+
+function SaveStatusPill({
+  isDefaultWorkspace,
+  dirty,
+  autoSaveOn,
+  snapshotBusy,
+  lastSnapshotAt,
+  onSaveAs,
+}: {
+  isDefaultWorkspace: boolean;
+  dirty: boolean;
+  autoSaveOn: boolean;
+  snapshotBusy: boolean;
+  lastSnapshotAt: number | null;
+  onSaveAs: () => void;
+}) {
+  if (isDefaultWorkspace) {
+    if (dirty) {
+      return (
+        <button
+          type="button"
+          className="status-pill warn clickable"
+          onClick={onSaveAs}
+          title="Default workspace — Save As to keep these changes in your own .mimo file"
+        >
+          <span className="status-dot" /> Unsaved · Save As…
+        </button>
+      );
+    }
+    return (
+      <span className="status-pill muted-pill" title="Default workspace">
+        <span className="status-dot" /> Scratch workspace
+      </span>
+    );
+  }
+  if (snapshotBusy) {
+    return (
+      <span className="status-pill" title="Writing snapshot…">
+        <span className="status-dot busy" /> Auto-saving…
+      </span>
+    );
+  }
+  if (autoSaveOn && lastSnapshotAt) {
+    return (
+      <span
+        className="status-pill ok"
+        title={`Last snapshot ${new Date(lastSnapshotAt).toLocaleString()}`}
+      >
+        <span className="status-dot ok" /> Auto-saved {relativeTimeShort(Date.now() - lastSnapshotAt)}
+      </span>
+    );
+  }
+  return (
+    <span className="status-pill ok" title="Every change is written to the .mimo file immediately">
+      <span className="status-dot ok" /> Saved
+    </span>
   );
 }
 
@@ -645,113 +746,6 @@ function PlannedAmountInput({
   );
 }
 
-type PeriodModalConfig = {
-  intent: "create" | "duplicate" | "edit";
-  editMonthId?: number;
-  title: string;
-  confirmLabel: string;
-  initialStart: string;
-  initialEnd: string;
-};
-
-function PeriodRangeModal({
-  config,
-  onClose,
-  onConfirm,
-}: {
-  config: PeriodModalConfig | null;
-  onClose: () => void;
-  onConfirm: (start: string, end: string) => void;
-}) {
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
-
-  useEffect(() => {
-    if (!config) return;
-    setStart(config.initialStart);
-    setEnd(config.initialEnd);
-  }, [config]);
-
-  if (!config) return null;
-
-  const startYearMonth = start.length >= 7 ? start.slice(0, 7) : "";
-
-  const applyFullMonth = () => {
-    if (!startYearMonth) return;
-    const b = fullMonthBoundsFromYearMonth(startYearMonth);
-    setStart(b.periodStart);
-    setEnd(b.periodEnd);
-  };
-
-  const save = () => {
-    if (end < start) {
-      window.alert("End date must be on or after start date.");
-      return;
-    }
-    onConfirm(start, end);
-  };
-
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="period-modal-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="period-modal-title" className="modal-title">
-          {config.title}
-        </h2>
-        <p className="modal-assume">
-          If the range is a full calendar month, the tab label uses the month shorthand (e.g. APR &apos;26).
-        </p>
-        <div className="modal-fields">
-          <label className="field-inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
-            <span className="label">Start</span>
-            <input
-              className="input mono"
-              type="date"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-            />
-          </label>
-          <label className="field-inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
-            <span className="label">End</span>
-            <input
-              className="input mono"
-              type="date"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
-            />
-          </label>
-          <div className="modal-quick">
-            <button
-              type="button"
-              className="btn secondary"
-              onClick={() => applyFullMonth()}
-              disabled={!startYearMonth}
-            >
-              Use full month
-            </button>
-            <p className="modal-hint">
-              Sets the range to the full calendar month of the <strong>Start</strong> date (End is ignored).
-            </p>
-          </div>
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn primary" onClick={() => void save()}>
-            {config.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function BucketReorderModal({
   open,
   buckets,
@@ -911,7 +905,7 @@ function UnsavedChangesModal({
           Save changes before quitting?
         </h2>
         <p className="modal-hint">
-          This workspace has not been saved to a <code>.budget</code> file. Save it now or your
+          This workspace has not been saved to a <code>.mimo</code> file. Save it now or your
           changes will only remain in this app's default workspace.
         </p>
         <div className="modal-actions unsaved-changes-actions">
@@ -949,28 +943,10 @@ function UnsavedChangesModal({
 type AppView =
   | { kind: "welcome" }
   | { kind: "library" }
-  | { kind: "overview" }
+  | { kind: "overview"; yearId: number | null }
   | { kind: "reports" }
+  | { kind: "cross-year" }
   | { kind: "month"; monthId: number };
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.12s" }}
-    >
-      <polyline points="9 6 15 12 9 18" />
-    </svg>
-  );
-}
 
 function PlusIcon({ size = 14 }: { size?: number }) {
   return (
@@ -986,24 +962,6 @@ function PlusIcon({ size = 14 }: { size?: number }) {
     >
       <line x1="5" y1="12" x2="19" y2="12" />
       <line x1="12" y1="5" x2="12" y2="19" />
-    </svg>
-  );
-}
-
-function FolderIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinejoin="round"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.4l1.6 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
     </svg>
   );
 }
@@ -1027,107 +985,28 @@ function LockIcon({ size = 12 }: { size?: number }) {
   );
 }
 
-function YearLabelEditor({
-  initial,
-  onCancel,
-  onCommit,
-}: {
-  initial: string;
-  onCancel: () => void;
-  onCommit: (value: string) => void;
-}) {
-  const [value, setValue] = useState(initial);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-  return (
-    <form
-      className="year-label-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const trimmed = value.trim();
-        if (trimmed) onCommit(trimmed);
-        else onCancel();
-      }}
-    >
-      <input
-        ref={inputRef}
-        className="year-label-input"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={() => {
-          const trimmed = value.trim();
-          if (trimmed && trimmed !== initial) onCommit(trimmed);
-          else onCancel();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            onCancel();
-          }
-        }}
-        aria-label="Year label"
-      />
-    </form>
-  );
-}
-
-function YearHeader({
-  meta,
-  isDefaultWorkspace,
+function YearListRow({
+  year,
   active,
-  onActivate,
-  onRename,
+  onSelect,
 }: {
-  meta: WorkspaceMeta | null;
-  isDefaultWorkspace: boolean;
+  year: YearRow;
   active: boolean;
-  onActivate: () => void;
-  onRename: (label: string) => Promise<void>;
+  onSelect: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const label = meta?.yearLabel?.trim() || (isDefaultWorkspace ? "Untitled" : "");
   return (
-    <div className={`sidebar-year ${active ? "active" : ""}`}>
-      <button
-        type="button"
-        className="sidebar-year-main"
-        onClick={onActivate}
-        title="Show year overview"
-      >
-        <span className="sidebar-year-eyebrow">Workspace</span>
-        {editing ? (
-          <YearLabelEditor
-            initial={label}
-            onCancel={() => setEditing(false)}
-            onCommit={async (next) => {
-              setEditing(false);
-              await onRename(next);
-            }}
-          />
-        ) : (
-          <span className="sidebar-year-label" title="Click to rename">
-            {label || "Add a year label"}
-          </span>
-        )}
+    <li className={`sidebar-year-row ${active ? "active" : ""}`}>
+      <button type="button" className="sidebar-year-main" onClick={onSelect}>
+        <span className="sidebar-year-label-big">{year.yearLabel}</span>
+        <span className="sidebar-year-meta muted">
+          {year.trackedMonthCount === 0
+            ? "No months tracked"
+            : `${year.trackedMonthCount} ${
+                year.trackedMonthCount === 1 ? "month" : "months"
+              } tracked`}
+        </span>
       </button>
-      {!editing && (
-        <button
-          type="button"
-          className="icon-btn small ghost"
-          title="Rename year (also renames the file)"
-          aria-label="Rename year"
-          onClick={(e) => {
-            e.stopPropagation();
-            setEditing(true);
-          }}
-        >
-          <PencilIcon size={13} />
-        </button>
-      )}
-    </div>
+    </li>
   );
 }
 
@@ -1135,32 +1014,19 @@ function MonthRowItem({
   row,
   active,
   onActivate,
-  onEditDates,
 }: {
   row: MonthRow;
   active: boolean;
   onActivate: () => void;
-  onEditDates: () => void;
 }) {
+  const monthLabel =
+    row.calendarMonth != null
+      ? MONTH_NAMES_FULL[row.calendarMonth - 1]
+      : row.tabLabel;
   return (
     <li className={`sidebar-month-row ${active ? "active" : ""}`}>
       <button type="button" className="sidebar-month-main" onClick={onActivate}>
-        <span className="sidebar-month-label">{row.tabLabel}</span>
-        <span className="sidebar-month-range">
-          {row.periodStart} → {row.periodEnd}
-        </span>
-      </button>
-      <button
-        type="button"
-        className="icon-btn small ghost"
-        title="Change dates / rename this period"
-        aria-label="Edit period"
-        onClick={(e) => {
-          e.stopPropagation();
-          onEditDates();
-        }}
-      >
-        <PencilIcon size={12} />
+        <span className="sidebar-month-label">{monthLabel}</span>
       </button>
     </li>
   );
@@ -1169,42 +1035,42 @@ function MonthRowItem({
 function Sidebar({
   collapsed,
   onToggleCollapsed,
-  workspaceMeta,
-  isDefaultWorkspace,
+  workspaceTitle,
+  workspaceTitleIsPlaceholder,
+  workspacePathTooltip,
+  years,
   months,
   view,
-  onShowOverview,
-  onShowReports,
-  onShowLibrary,
+  sidebarYearId,
+  onSelectYear,
+  onBackToYears,
+  onShowYearOverview,
+  onShowCrossYear,
   onActivateMonth,
-  onAddMonth,
-  onDuplicateCurrentMonth,
-  onEditPeriod,
-  onRenameYear,
-  hasWorkspace,
+  onCreateYear,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  workspaceMeta: WorkspaceMeta | null;
-  isDefaultWorkspace: boolean;
+  workspaceTitle: string;
+  workspaceTitleIsPlaceholder: boolean;
+  workspacePathTooltip?: string;
+  years: YearRow[];
   months: MonthRow[];
   view: AppView;
-  onShowOverview: () => void;
-  onShowReports: () => void;
-  onShowLibrary: () => void;
+  sidebarYearId: number | null;
+  onSelectYear: (id: number) => void;
+  onBackToYears: () => void;
+  onShowYearOverview: (id: number) => void;
+  onShowCrossYear: () => void;
   onActivateMonth: (id: number) => void;
-  onAddMonth: () => void;
-  onDuplicateCurrentMonth: () => void;
-  onEditPeriod: (id: number) => void;
-  onRenameYear: (next: string) => Promise<void>;
-  hasWorkspace: boolean;
+  onCreateYear: () => void;
 }) {
   if (collapsed) {
     return (
       <aside className="sidebar collapsed" aria-label="Workspace sidebar">
         <button
           type="button"
-          className="sidebar-collapse-btn"
+          className="sidebar-collapse-tab"
           onClick={onToggleCollapsed}
           title="Expand sidebar (⌘\\)"
           aria-label="Expand sidebar"
@@ -1215,89 +1081,158 @@ function Sidebar({
     );
   }
 
-  const overviewActive = view.kind === "overview";
-  const reportsActive = view.kind === "reports";
-  const libraryActive = view.kind === "library";
+  const activeYear = years.find((y) => y.id === sidebarYearId) ?? null;
+  const overviewActive =
+    view.kind === "overview" && activeYear != null && view.yearId === activeYear.id;
 
   return (
     <aside className="sidebar" aria-label="Workspace sidebar">
-      <div className="sidebar-top">
-        <div className="sidebar-top-links">
-          <button
-            type="button"
-            className={`sidebar-library-link${reportsActive ? " active" : ""}`}
-            onClick={onShowReports}
-            aria-pressed={reportsActive}
-            title="Calendar reports (⌘⇧R)"
-          >
-            <CalendarIcon /> Reports
-          </button>
-          <button
-            type="button"
-            className="sidebar-library-link"
-            onClick={onShowLibrary}
-            aria-pressed={libraryActive}
-          >
-            <FolderIcon /> All years…
-          </button>
-        </div>
-        <button
-          type="button"
-          className="sidebar-collapse-btn"
-          onClick={onToggleCollapsed}
-          title="Collapse sidebar (⌘\\)"
-          aria-label="Collapse sidebar"
+      <div className="sidebar-header">
+        <div
+          className={`sidebar-workspace${
+            workspaceTitleIsPlaceholder ? " is-placeholder" : ""
+          }`}
+          title={workspacePathTooltip}
         >
-          ‹
-        </button>
+          <span className="sidebar-workspace-eyebrow">Workspace</span>
+          <span className="sidebar-workspace-title">{workspaceTitle}</span>
+        </div>
+        {activeYear ? (
+          <button
+            type="button"
+            className="sidebar-back"
+            onClick={onBackToYears}
+            title="Back to all years"
+            aria-label="Back to all years"
+          >
+            ‹ Years
+          </button>
+        ) : (
+          <h3 className="sidebar-section-title sidebar-eyebrow-title">Years</h3>
+        )}
       </div>
 
-      {hasWorkspace && (
-        <YearHeader
-          meta={workspaceMeta}
-          isDefaultWorkspace={isDefaultWorkspace}
-          active={overviewActive}
-          onActivate={onShowOverview}
-          onRename={onRenameYear}
-        />
-      )}
-
-      {hasWorkspace && (
+      <div className="sidebar-scroll">
+      {!activeYear && (
         <div className="sidebar-section">
-          <div className="sidebar-section-header">
-            <ChevronIcon open />
-            <span>Months</span>
-          </div>
-          <ul className="sidebar-month-list">
-            {months.length === 0 && (
-              <li className="sidebar-empty muted">No months yet — add one below.</li>
+          {years.length > 1 && (
+            <ul className="sidebar-month-list">
+              <li
+                className={`sidebar-month-row ${
+                  view.kind === "cross-year" ? "active" : ""
+                }`}
+              >
+                <button
+                  type="button"
+                  className="sidebar-month-main"
+                  onClick={onShowCrossYear}
+                  title="Compare all years in this workspace"
+                >
+                  <span className="sidebar-month-label">
+                    All years in this workspace
+                  </span>
+                </button>
+              </li>
+            </ul>
+          )}
+          <ul className="sidebar-year-list">
+            {years.length === 0 && (
+              <li className="sidebar-empty muted">
+                No years yet — create your first below.
+              </li>
             )}
-            {months.map((m) => (
-              <MonthRowItem
-                key={m.id}
-                row={m}
-                active={view.kind === "month" && view.monthId === m.id}
-                onActivate={() => onActivateMonth(m.id)}
-                onEditDates={() => onEditPeriod(m.id)}
+            {years.map((y) => (
+              <YearListRow
+                key={y.id}
+                year={y}
+                active={false}
+                onSelect={() => onSelectYear(y.id)}
               />
             ))}
           </ul>
           <div className="sidebar-section-actions">
-            <button type="button" className="sidebar-action" onClick={onAddMonth}>
-              <PlusIcon /> Add month
-            </button>
-            <button
-              type="button"
-              className="sidebar-action"
-              onClick={onDuplicateCurrentMonth}
-              disabled={view.kind !== "month"}
-              title="Duplicate the active month (planned amounts only)"
-            >
-              Duplicate current
+            <button type="button" className="sidebar-action" onClick={onCreateYear}>
+              <PlusIcon /> New year
             </button>
           </div>
         </div>
       )}
+
+      {activeYear && (
+        <>
+          <div className={`sidebar-year-header ${overviewActive ? "active" : ""}`}>
+            <button
+              type="button"
+              className="sidebar-year-main"
+              onClick={() => onShowYearOverview(activeYear.id)}
+              title="Show year overview"
+            >
+              <span className="sidebar-year-eyebrow">Year</span>
+              <span className="sidebar-year-label">{activeYear.yearLabel}</span>
+            </button>
+          </div>
+
+          <hr className="sidebar-divider" aria-hidden="true" />
+
+          <div className="sidebar-section">
+            <ul className="sidebar-month-list">
+              <li className={`sidebar-month-row ${overviewActive ? "active" : ""}`}>
+                <button
+                  type="button"
+                  className="sidebar-month-main"
+                  onClick={() => onShowYearOverview(activeYear.id)}
+                >
+                  <span className="sidebar-month-label">Year overview</span>
+                </button>
+              </li>
+            </ul>
+            <h3 className="sidebar-section-title">Months</h3>
+            <ul className="sidebar-month-list nested">
+              {months
+                .filter((m) => m.calendarMonth != null)
+                .sort(
+                  (a, b) => (a.calendarMonth ?? 99) - (b.calendarMonth ?? 99),
+                )
+                .map((m) => (
+                  <MonthRowItem
+                    key={m.id}
+                    row={m}
+                    active={view.kind === "month" && view.monthId === m.id}
+                    onActivate={() => onActivateMonth(m.id)}
+                  />
+                ))}
+            </ul>
+            {months.some((m) => m.calendarMonth == null) && (
+              <>
+                <h3 className="sidebar-section-title subtle">Custom periods</h3>
+                <ul className="sidebar-month-list nested">
+                  {months
+                    .filter((m) => m.calendarMonth == null)
+                    .map((m) => (
+                      <MonthRowItem
+                        key={m.id}
+                        row={m}
+                        active={view.kind === "month" && view.monthId === m.id}
+                        onActivate={() => onActivateMonth(m.id)}
+                      />
+                    ))}
+                </ul>
+              </>
+            )}
+          </div>
+        </>
+      )}
+      </div>
+
+      <button
+        type="button"
+        className="sidebar-collapse-tab"
+        onClick={onToggleCollapsed}
+        title="Collapse sidebar (⌘\\)"
+        aria-label="Collapse sidebar"
+      >
+        ‹
+      </button>
     </aside>
   );
 }
@@ -1324,10 +1259,11 @@ function WelcomeScreen({
   return (
     <div className="welcome-screen">
       <div className="welcome-hero">
-        <h1>Welcome to Budget</h1>
+        <h1>Welcome to mimo</h1>
         <p className="welcome-sub">
-          Your `.budget` files live in <code>{defaultFolder ?? "~/Documents/Budget"}</code>.
-          Each file holds one year of budgeting. Open or create one to begin.
+          Your <code>.mimo</code> files live in{" "}
+          <code>{defaultFolder ?? "~/Documents/Budget"}</code>. Each file holds one
+          year of budgeting. Open or create one to begin.
         </p>
       </div>
 
@@ -1339,9 +1275,10 @@ function WelcomeScreen({
           disabled={busy}
         >
           <span className="welcome-card-eyebrow">Start a new year</span>
-          <span className="welcome-card-title">Create a year budget</span>
+          <span className="welcome-card-title">Create a budget</span>
           <span className="welcome-card-sub">
-            Picks a calendar year, scaffolds 12 months, and saves a fresh `.budget` file.
+            Picks a calendar year, scaffolds 12 months, and saves a fresh{" "}
+            <code>.mimo</code> file.
           </span>
         </button>
         <button
@@ -1352,7 +1289,10 @@ function WelcomeScreen({
         >
           <span className="welcome-card-eyebrow">Have a file?</span>
           <span className="welcome-card-title">Open existing budget…</span>
-          <span className="welcome-card-sub">Opens any .budget file in a new window.</span>
+          <span className="welcome-card-sub">
+            Opens any <code>.mimo</code> (or legacy <code>.budget</code>) file in a new
+            window.
+          </span>
         </button>
         <button
           type="button"
@@ -1363,7 +1303,7 @@ function WelcomeScreen({
           <span className="welcome-card-eyebrow">Browse</span>
           <span className="welcome-card-title">Library of years</span>
           <span className="welcome-card-sub">
-            See every `.budget` file in your default folder, with summaries.
+            See every <code>.mimo</code> file in your default folder, with summaries.
           </span>
         </button>
       </div>
@@ -1398,10 +1338,110 @@ function WelcomeScreen({
   );
 }
 
+// Soft banner shown in the year-landing and year-overview screens during
+// November/December if the next calendar year hasn't been scaffolded yet.
+// The CTA opens the duplicate-year modal pre-seeded with the latest source
+// year, which already defaults its destination to currentYear+1.
+function YearEndNudge({
+  sourceLabel,
+  nextLabel,
+  onStart,
+}: {
+  sourceLabel: string;
+  nextLabel: string;
+  onStart: () => void;
+}) {
+  return (
+    <div className="year-end-nudge" role="status">
+      <div className="year-end-nudge-text">
+        <strong>Plan {nextLabel} now?</strong>
+        <span className="muted">
+          {" "}
+          Roll {sourceLabel} forward — buckets and projected amounts copy over,
+          actuals stay put.
+        </span>
+      </div>
+      <button type="button" className="btn primary" onClick={onStart}>
+        Set up {nextLabel}
+      </button>
+    </div>
+  );
+}
+
+function YearsLanding({
+  years,
+  onSelectYear,
+  onCreateYear,
+  workspaceName,
+  yearEndNudge,
+  onStartYearEndNudge,
+}: {
+  years: YearRow[];
+  onSelectYear: (id: number) => void;
+  onCreateYear: () => void;
+  workspaceName: string;
+  yearEndNudge: { sourceLabel: string; nextLabel: string } | null;
+  onStartYearEndNudge: () => void;
+}) {
+  return (
+    <div className="years-landing">
+      <header className="years-landing-head">
+        <h1>{workspaceName}</h1>
+        <p className="muted">
+          Pick a year to open, or add another to this file.
+        </p>
+      </header>
+      {yearEndNudge && (
+        <YearEndNudge
+          sourceLabel={yearEndNudge.sourceLabel}
+          nextLabel={yearEndNudge.nextLabel}
+          onStart={onStartYearEndNudge}
+        />
+      )}
+      <ul className="years-landing-grid">
+        {years.map((y) => (
+          <li key={y.id}>
+            <button
+              type="button"
+              className="years-landing-card"
+              onClick={() => onSelectYear(y.id)}
+            >
+              <span className="years-landing-card-year">{y.yearLabel}</span>
+              <span className="years-landing-card-meta muted">
+                {y.trackedMonthCount === 0
+                  ? "No months tracked"
+                  : `${y.trackedMonthCount} ${
+                      y.trackedMonthCount === 1 ? "month" : "months"
+                    } tracked`}
+              </span>
+              <span className="years-landing-card-totals">
+                <span className="mini-label">Net</span>
+                <span className="num">{formatUsd(y.netActualCents, "rounded")}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+        <li>
+          <button
+            type="button"
+            className="years-landing-card add"
+            onClick={onCreateYear}
+          >
+            <span className="years-landing-card-year">+ New year</span>
+            <span className="years-landing-card-meta muted">
+              Adds Jan–Dec to this file.
+            </span>
+          </button>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 function basename(path: string): string {
   const parts = path.split(/[/\\]/);
   const last = parts[parts.length - 1] ?? path;
-  return last.replace(/\.budget$/i, "");
+  return last.replace(/\.(mimo|budget)$/i, "");
 }
 
 function LibraryView({
@@ -1444,49 +1484,90 @@ function LibraryView({
       </header>
       {entries.length === 0 ? (
         <div className="library-empty">
-          <p>No `.budget` files found in your default folder yet.</p>
+          <p>No <code>.mimo</code> files found in your default folder yet.</p>
           <p className="muted">Create a new year, or open one from elsewhere.</p>
         </div>
       ) : (
         <ul className="library-grid">
-          {entries.map((e) => (
-            <li key={e.path}>
-              <button
-                type="button"
-                className="library-card"
-                onClick={() => onOpen(e.path)}
+          {entries.map((e) => {
+            const lastEdited = e.lastEditedAt ?? e.lastModified;
+            const tooltipParts: string[] = [];
+            tooltipParts.push(`Last edited ${formatRelative(lastEdited)}`);
+            if (e.lastEditedAt && e.lastEditedAt !== e.lastModified) {
+              tooltipParts.push(
+                `File touched ${formatRelative(e.lastModified)} (cloud sync)`,
+              );
+            }
+            tooltipParts.push(e.path);
+            return (
+              <li
+                key={e.path}
+                className={e.isConflictCopy ? "library-grid-item conflict" : "library-grid-item"}
               >
-                <div className="library-card-head">
-                  <span className="library-card-year">{e.yearLabel || basename(e.path)}</span>
-                  {e.encrypted && (
-                    <span className="library-card-lock" title="Encrypted">
-                      <LockIcon />
-                    </span>
-                  )}
-                </div>
-                <div className="library-card-meta muted">
-                  Updated {formatRelative(e.lastModified)} · {e.monthCount} months
-                </div>
-                <div className="library-card-totals">
-                  <div>
-                    <span className="mini-label">Income</span>
-                    <span className="num">{formatUsd(e.incomeActualCents, "rounded")}</span>
+                <button
+                  type="button"
+                  className={`library-card ${
+                    e.isConflictCopy ? "is-conflict" : ""
+                  }`}
+                  onClick={() => onOpen(e.path)}
+                  title={tooltipParts.join("\n")}
+                >
+                  <div className="library-card-head">
+                    <span className="library-card-year">{basename(e.path)}</span>
+                    <div className="library-card-badges">
+                      {e.provider && (
+                        <span
+                          className="library-card-badge provider"
+                          title={`Stored in ${e.provider}`}
+                        >
+                          {e.provider}
+                        </span>
+                      )}
+                      {e.isConflictCopy && (
+                        <span
+                          className="library-card-badge conflict"
+                          title="Cloud sync conflict copy. Compare with the canonical file before merging."
+                        >
+                          Conflict copy
+                        </span>
+                      )}
+                      {e.encrypted && (
+                        <span
+                          className="library-card-lock"
+                          title="Encrypted"
+                        >
+                          <LockIcon />
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <span className="mini-label">Net spend</span>
-                    <span className="num">{formatUsd(e.expenseNetActualCents, "rounded")}</span>
+                  <div className="library-card-meta muted">
+                    Edited {formatRelative(lastEdited)} · {e.monthCount} months
                   </div>
-                  <div>
-                    <span className="mini-label">Net</span>
-                    <span className="num">{formatUsd(e.netActualCents, "rounded")}</span>
+                  <div className="library-card-totals">
+                    <div>
+                      <span className="mini-label">Income</span>
+                      <span className="num">
+                        {formatUsd(e.incomeActualCents, "rounded")}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="mini-label">Net spend</span>
+                      <span className="num">
+                        {formatUsd(e.expenseNetActualCents, "rounded")}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="mini-label">Net</span>
+                      <span className="num">
+                        {formatUsd(e.netActualCents, "rounded")}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="library-card-path muted" title={e.path}>
-                  {e.path}
-                </div>
-              </button>
-            </li>
-          ))}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -1515,9 +1596,13 @@ function formatRelative(iso: string): string {
 function YearOverviewView({
   overview,
   onActivateMonth,
+  yearEndNudge,
+  onStartYearEndNudge,
 }: {
   overview: YearOverview;
   onActivateMonth: (id: number) => void;
+  yearEndNudge: { sourceLabel: string; nextLabel: string } | null;
+  onStartYearEndNudge: () => void;
 }) {
   const totalRows: { label: string; planned: number; actual: number }[] = [
     {
@@ -1541,8 +1626,23 @@ function YearOverviewView({
     <div className="year-overview">
       <header className="year-overview-header">
         <h1>{overview.yearLabel || "Year overview"}</h1>
-        <p className="muted">{overview.months.length} months tracked</p>
+        <p className="muted">
+          {(() => {
+            const tracked = overview.months.filter(
+              (m) => m.incomeActualCents !== 0 || m.expenseNetActualCents !== 0,
+            ).length;
+            return `${tracked} ${tracked === 1 ? "month" : "months"} tracked`;
+          })()}
+        </p>
       </header>
+
+      {yearEndNudge && (
+        <YearEndNudge
+          sourceLabel={yearEndNudge.sourceLabel}
+          nextLabel={yearEndNudge.nextLabel}
+          onStart={onStartYearEndNudge}
+        />
+      )}
 
       <section className="card">
         <h2>Year totals</h2>
@@ -1653,6 +1753,246 @@ function YearOverviewView({
           </table>
         )}
       </section>
+    </div>
+  );
+}
+
+// Cross-year view: a tall matrix that lets the user compare every year in
+// the active workspace at a glance. Rows are buckets and lines, columns are
+// years. Clicking a column header drops back into that year's overview so the
+// user can drill in without losing the broader context.
+function CrossYearView({
+  data,
+  loading,
+  onJumpToYear,
+}: {
+  data: CrossYearOverview | null;
+  loading: boolean;
+  onJumpToYear: (yearId: number) => void;
+}) {
+  if (loading && !data) {
+    return <p className="muted month-loading-banner">Crunching cross-year totals…</p>;
+  }
+  if (!data || data.columns.length === 0) {
+    return (
+      <div className="year-overview">
+        <header className="year-overview-header">
+          <h1>All years</h1>
+          <p className="muted">
+            This workspace doesn't have any years yet. Create one from the
+            sidebar to start a multi-year comparison.
+          </p>
+        </header>
+      </div>
+    );
+  }
+
+  const columns = data.columns;
+  const incomeRows = data.lineRows.filter((r) => r.lineKind === "income");
+  const expenseRows = data.lineRows.filter((r) => r.lineKind === "expense");
+
+  return (
+    <div className="year-overview cross-year-view">
+      <header className="year-overview-header">
+        <h1>All years in this workspace</h1>
+        <p className="muted">
+          Comparing {columns.length} {columns.length === 1 ? "year" : "years"}.
+          Click a column header to open that year's overview.
+        </p>
+      </header>
+
+      <section className="card">
+        <h2>Year totals</h2>
+        <div className="cross-year-totals">
+          {columns.map((c) => {
+            const incomeDelta = c.incomeActualCents - c.incomePlannedCents;
+            const expenseDelta = c.expensePlannedCents - c.expenseActualCents;
+            const netDelta = c.netActualCents - c.netPlannedCents;
+            return (
+              <button
+                type="button"
+                key={c.yearId}
+                className="cross-year-total-card"
+                onClick={() => onJumpToYear(c.yearId)}
+                title="Open year overview"
+              >
+                <div className="cross-year-total-head">
+                  <span className="cross-year-total-label">{c.yearLabel}</span>
+                  <span className="cross-year-total-meta">
+                    {c.trackedMonthCount}{" "}
+                    {c.trackedMonthCount === 1 ? "month" : "months"} tracked
+                  </span>
+                </div>
+                <dl className="cross-year-total-stats">
+                  <dt>Income</dt>
+                  <dd className="num">
+                    {formatUsd(c.incomeActualCents, "rounded")}
+                    <span
+                      className={`cross-year-delta ${varianceClassIncome(incomeDelta)}`}
+                    >
+                      {formatUsd(incomeDelta, "rounded")}
+                    </span>
+                  </dd>
+                  <dt>Net expenses</dt>
+                  <dd className="num">
+                    {formatUsd(c.expenseActualCents, "rounded")}
+                    <span
+                      className={`cross-year-delta ${varianceClassExpense(expenseDelta)}`}
+                    >
+                      {formatUsd(expenseDelta, "rounded")}
+                    </span>
+                  </dd>
+                  <dt>Net</dt>
+                  <dd className="num">
+                    {formatUsd(c.netActualCents, "rounded")}
+                    <span
+                      className={`cross-year-delta ${varianceClassExpense(netDelta)}`}
+                    >
+                      {formatUsd(netDelta, "rounded")}
+                    </span>
+                  </dd>
+                </dl>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>By bucket</h2>
+        {data.bucketRows.length === 0 ? (
+          <p className="muted">No expense buckets yet.</p>
+        ) : (
+          <CrossYearMatrix
+            columns={columns}
+            rows={data.bucketRows.map((r) => ({
+              key: r.bucketName,
+              label: r.bucketName,
+              cells: r.cells,
+              totalActual: r.totalActualCents,
+              totalPlanned: r.totalPlannedCents,
+            }))}
+            onJumpToYear={onJumpToYear}
+          />
+        )}
+      </section>
+
+      {incomeRows.length > 0 && (
+        <section className="card">
+          <h2>By income line</h2>
+          <CrossYearMatrix
+            columns={columns}
+            rows={incomeRows.map((r) => ({
+              key: `${r.lineKind}::${r.lineIdentity}`,
+              label: r.displayName,
+              sublabel: undefined,
+              cells: r.cells,
+              totalActual: r.totalActualCents,
+              totalPlanned: r.totalPlannedCents,
+              isIncome: true,
+            }))}
+            onJumpToYear={onJumpToYear}
+          />
+        </section>
+      )}
+
+      {expenseRows.length > 0 && (
+        <section className="card">
+          <h2>By expense line</h2>
+          <CrossYearMatrix
+            columns={columns}
+            rows={expenseRows.map((r) => ({
+              key: `${r.lineKind}::${r.lineIdentity}`,
+              label: r.displayName,
+              sublabel: r.bucketName ?? undefined,
+              cells: r.cells,
+              totalActual: r.totalActualCents,
+              totalPlanned: r.totalPlannedCents,
+            }))}
+            onJumpToYear={onJumpToYear}
+          />
+        </section>
+      )}
+    </div>
+  );
+}
+
+type CrossYearMatrixRow = {
+  key: string;
+  label: string;
+  sublabel?: string;
+  cells: { plannedCents: number; actualCents: number }[];
+  totalPlanned: number;
+  totalActual: number;
+  isIncome?: boolean;
+};
+
+function CrossYearMatrix({
+  columns,
+  rows,
+  onJumpToYear,
+}: {
+  columns: CrossYearOverview["columns"];
+  rows: CrossYearMatrixRow[];
+  onJumpToYear: (yearId: number) => void;
+}) {
+  return (
+    <div className="cross-year-matrix-wrap">
+      <table className="data-table cross-year-matrix">
+        <thead>
+          <tr>
+            <th className="cross-year-row-head">Row</th>
+            {columns.map((c) => (
+              <th key={c.yearId} className="num">
+                <button
+                  type="button"
+                  className="btn-link cross-year-col-link"
+                  onClick={() => onJumpToYear(c.yearId)}
+                  title={`Open ${c.yearLabel}`}
+                >
+                  {c.yearLabel}
+                </button>
+              </th>
+            ))}
+            <th className="num">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="cross-year-row-head">
+                <div className="cross-year-row-label">{row.label}</div>
+                {row.sublabel && (
+                  <div className="cross-year-row-sub muted">{row.sublabel}</div>
+                )}
+              </td>
+              {row.cells.map((cell, i) => {
+                const empty = cell.plannedCents === 0 && cell.actualCents === 0;
+                return (
+                  <td key={i} className="num">
+                    {empty ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      <>
+                        <div>{formatUsd(cell.actualCents, "rounded")}</div>
+                        <div className="cross-year-cell-meta muted">
+                          plan {formatUsd(cell.plannedCents, "rounded")}
+                        </div>
+                      </>
+                    )}
+                  </td>
+                );
+              })}
+              <td className="num cross-year-row-total">
+                <div>{formatUsd(row.totalActual, "rounded")}</div>
+                <div className="cross-year-cell-meta muted">
+                  plan {formatUsd(row.totalPlanned, "rounded")}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1847,11 +2187,14 @@ function ReportsView({
     };
   }, []);
 
+  // When the parent seeds us from the drawer, adopt year/asOf/selection AND auto-run.
+  const [pendingAutoRun, setPendingAutoRun] = useState(false);
   useEffect(() => {
     if (!initial) return;
     setYear(initial.year);
     setAsOf(initial.asOf);
     setSelectedKeys(new Set(initial.selected.map((s) => lineRefKey(s))));
+    setPendingAutoRun(true);
     onInitialApplied();
   }, [initial, onInitialApplied]);
 
@@ -1866,7 +2209,7 @@ function ReportsView({
     );
   }, [catalog, filter]);
 
-  const runReport = async () => {
+  const runReport = useCallback(async () => {
     setReportErr(null);
     const lines: LineRef[] = [];
     for (const c of catalog) {
@@ -1894,7 +2237,35 @@ function ReportsView({
     } finally {
       setLoading(false);
     }
-  };
+  }, [catalog, selectedKeys, year, asOf]);
+
+  // If we were seeded from the drawer, auto-run once the catalog has loaded.
+  useEffect(() => {
+    if (!pendingAutoRun) return;
+    if (catalogLoading) return;
+    if (selectedKeys.size === 0) return;
+    setPendingAutoRun(false);
+    void runReport();
+  }, [pendingAutoRun, catalogLoading, selectedKeys, runReport]);
+
+  // Income vs. expense split for results — used to guard the combined-total card.
+  const resultKindBreakdown = useMemo(() => {
+    if (!report) return { income: 0, expense: 0, incomeTotal: 0, expenseTotal: 0 };
+    let inc = 0;
+    let exp = 0;
+    let incTotal = 0;
+    let expTotal = 0;
+    for (const r of report.rows) {
+      if (r.lineKind === "income") {
+        inc += 1;
+        incTotal += r.totalCents;
+      } else {
+        exp += 1;
+        expTotal += r.totalCents;
+      }
+    }
+    return { income: inc, expense: exp, incomeTotal: incTotal, expenseTotal: expTotal };
+  }, [report]);
 
   const toggleLine = (c: WorkspaceLineCatalogEntry) => {
     const k = lineRefKey(c);
@@ -1909,9 +2280,11 @@ function ReportsView({
   return (
     <div className="reports-view">
       <header className="reports-header">
-        <h1>Reports</h1>
+        <h1>Reports · by transaction date</h1>
         <p className="muted">
-          Calendar-year totals from dated transactions and income entries, rolled up by line identity
+          Calendar-year totals computed from <code>occurred_on</code> /{" "}
+          <code>received_on</code> dates on individual transactions and income entries
+          (not by which budget period they were entered into), rolled up by line identity
           across every month in this file.
         </p>
       </header>
@@ -2014,10 +2387,42 @@ function ReportsView({
               ({report.rangeStart} → {report.rangeEnd})
             </span>
           </h2>
-          <div className="reports-combined-total">
-            <span className="ytd-label">Combined total</span>
-            <span className="ytd-value">{formatUsd(report.combinedTotalCents, "rounded")}</span>
-          </div>
+          {resultKindBreakdown.income > 0 && resultKindBreakdown.expense > 0 ? (
+            <div className="reports-combined-split">
+              <div className="reports-combined-total">
+                <span className="ytd-label">Combined income</span>
+                <span className="ytd-value pos">
+                  {formatUsd(resultKindBreakdown.incomeTotal, "rounded")}
+                </span>
+              </div>
+              <div className="reports-combined-total">
+                <span className="ytd-label">Combined expenses</span>
+                <span className="ytd-value neg">
+                  {formatUsd(resultKindBreakdown.expenseTotal, "rounded")}
+                </span>
+              </div>
+              <div className="reports-combined-total">
+                <span className="ytd-label">Net</span>
+                <span className="ytd-value">
+                  {formatUsd(
+                    resultKindBreakdown.incomeTotal - resultKindBreakdown.expenseTotal,
+                    "rounded",
+                  )}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="reports-combined-total">
+              <span className="ytd-label">
+                Combined total
+                {resultKindBreakdown.income > 0 ? " (income)" : ""}
+                {resultKindBreakdown.expense > 0 ? " (expenses)" : ""}
+              </span>
+              <span className="ytd-value">
+                {formatUsd(report.combinedTotalCents, "rounded")}
+              </span>
+            </div>
+          )}
           <MonthlyBarsChart monthly={report.combinedMonthly} className="reports-combined-chart" />
           <table className="data-table">
             <thead>
@@ -2043,34 +2448,156 @@ function ReportsView({
   );
 }
 
-function ExternalRenameModal({
-  info,
-  onAcknowledge,
+type ExpenseLineEditConfig =
+  | {
+      mode: "add";
+      bucketId: number;
+      bucketName: string;
+    }
+  | {
+      mode: "edit";
+      lineId: number;
+      bucketName?: string;
+      initialName: string;
+      initialNeutral: boolean;
+      initialSinking: boolean;
+    };
+
+function ExpenseLineEditModal({
+  config,
+  onCancel,
+  onSubmit,
 }: {
-  info: ExternalRenameInfo | null;
-  onAcknowledge: () => void;
+  config: ExpenseLineEditConfig | null;
+  onCancel: () => void;
+  onSubmit: (payload: {
+    name: string;
+    isNeutralTransfer: boolean;
+    isSinkingFund: boolean;
+  }) => Promise<void> | void;
 }) {
-  if (!info) return null;
+  const [name, setName] = useState("");
+  const [neutral, setNeutral] = useState(false);
+  const [sinking, setSinking] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!config) return;
+    if (config.mode === "add") {
+      setName("");
+      setNeutral(false);
+      setSinking(false);
+    } else {
+      setName(config.initialName);
+      setNeutral(config.initialNeutral);
+      setSinking(config.initialSinking);
+    }
+    setBusy(false);
+  }, [config]);
+
+  if (!config) return null;
+
+  const isAdd = config.mode === "add";
+  const heading = isAdd ? "Add budget row" : "Edit budget row";
+  const subheading = isAdd
+    ? `New row in ${config.bucketName}`
+    : config.bucketName
+      ? `Editing row in ${config.bucketName}`
+      : "Edit row";
+  const confirmLabel = isAdd ? "Create row" : "Save changes";
+
+  const handleSubmit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    try {
+      await onSubmit({
+        name: trimmed,
+        isNeutralTransfer: neutral,
+        isSinkingFund: sinking,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!busy) onCancel();
+      }}
+    >
       <div
-        className="modal-card"
+        className="modal-card line-edit-card"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="external-rename-title"
+        aria-labelledby="line-edit-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="external-rename-title" className="modal-title">
-          File was renamed outside the app
+        <h2 id="line-edit-title" className="modal-title">
+          {heading}
         </h2>
-        <p className="modal-hint">
-          The file on disk is named <code>{info.fileBasename}.budget</code>, but the workspace
-          inside it is labeled <strong>{info.yearLabel || "(blank)"}</strong>. The app will
-          adopt the new name.
-        </p>
+        <p className="modal-hint">{subheading}</p>
+        <div className="modal-fields">
+          <label className="field-stack">
+            <span className="label">Row name</span>
+            <input
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              placeholder="e.g. Streaming, Dining out, Tuition"
+            />
+          </label>
+
+          <label className="line-edit-toggle">
+            <input
+              type="checkbox"
+              checked={neutral}
+              onChange={(e) => setNeutral(e.target.checked)}
+            />
+            <span>
+              <span className="line-edit-toggle-label">Neutral transfer (tracking only)</span>
+              <span className="line-edit-toggle-hint">
+                Excludes this line from net spend totals. Use for credit-card payments,
+                savings transfers, and other intra-account moves.
+              </span>
+            </span>
+          </label>
+
+          <label className="line-edit-toggle">
+            <input
+              type="checkbox"
+              checked={sinking}
+              onChange={(e) => setSinking(e.target.checked)}
+            />
+            <span>
+              <span className="line-edit-toggle-label">Sinking fund</span>
+              <span className="line-edit-toggle-hint">
+                Marks this line as money you set aside each month for an irregular or
+                annual expense (gifts, travel, renewals).
+              </span>
+            </span>
+          </label>
+        </div>
         <div className="modal-actions">
-          <button type="button" className="btn primary" autoFocus onClick={onAcknowledge}>
-            Got it
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => void handleSubmit()}
+            disabled={busy || !name.trim()}
+          >
+            {busy ? "Saving…" : confirmLabel}
           </button>
         </div>
       </div>
@@ -2078,81 +2605,1288 @@ function ExternalRenameModal({
   );
 }
 
-function NewYearModal({
+function ConfirmDeleteRowModal({
+  open,
+  rowName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  rowName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!busy) onCancel();
+      }}
+    >
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-delete-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirm-delete-title" className="modal-title">
+          Delete row?
+        </h2>
+        <p className="modal-hint">
+          This will delete <strong>{rowName}</strong> and every transaction recorded against
+          it in this month. This cannot be undone.
+        </p>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn primary danger"
+            onClick={onConfirm}
+            disabled={busy}
+            autoFocus
+          >
+            {busy ? "Deleting…" : "Delete row"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Preventing the default mousedown on Cancel keeps focus on whatever input
+// the user was editing. Without this, clicking Cancel first blurs the input,
+// which trips eager validation (`setTouched(true)`) and flashes a one-frame
+// error message right before the modal unmounts.
+const preventFocusSteal = (e: ReactMouseEvent<HTMLButtonElement>) => {
+  e.preventDefault();
+};
+
+// Shared Escape-to-close hook used by every modal in this file. Centralizing
+// it ensures the contract is consistent: only fires while the modal is open
+// and not busy, and removes its own listener as soon as either flips.
+function useModalEscape(active: boolean, onEscape: () => void) {
+  useEffect(() => {
+    if (!active) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onEscape();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active, onEscape]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Preferences
+//
+// Hosts user-tweakable app settings. Designed to be extended over time:
+// add a new entry to PREFERENCE_SECTIONS and render a panel for it. Each
+// section is a self-contained group so we can add Display/Behavior/Backups/etc.
+// without rethinking the shell.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type PreferenceSectionId = "general";
+
+const PREFERENCE_SECTIONS: ReadonlyArray<{
+  id: PreferenceSectionId;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "general",
+    label: "General",
+    description: "Workspace defaults that apply to every file you open.",
+  },
+];
+
+// Password collection for the encryption flows. The same modal handles
+// "set initial password" (single field), "unlock" (single field with a
+// "wrong password" affordance), and "change password" (two fields). We
+// keep the surface consistent across flows so the user reads one
+// pattern instead of three slightly different ones.
+type PasswordModalKind = "set" | "unlock" | "change";
+
+function PasswordModal({
+  kind,
+  open,
+  busy,
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  kind: PasswordModalKind;
+  open: boolean;
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSubmit: (password: string) => void;
+}) {
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  useEffect(() => {
+    if (open) {
+      setPw("");
+      setConfirm("");
+    }
+  }, [open, kind]);
+  useModalEscape(open && !busy, onCancel);
+  if (!open) return null;
+  const needsConfirm = kind !== "unlock";
+  const trimmed = pw;
+  const localError = !trimmed
+    ? "Enter a password"
+    : needsConfirm && trimmed !== confirm
+      ? "Passwords don't match"
+      : null;
+  const submit = () => {
+    if (localError) return;
+    onSubmit(trimmed);
+  };
+  const title =
+    kind === "set"
+      ? "Protect this workspace"
+      : kind === "change"
+        ? "Change password"
+        : "Unlock workspace";
+  const help =
+    kind === "set"
+      ? "Choose a password to encrypt this file with SQLCipher. There is no recovery — losing the password means losing the data."
+      : kind === "change"
+        ? "Pick a new password. Old backups still need the old password."
+        : "Enter the password for this workspace.";
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <form
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="password-modal-title"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        noValidate
+      >
+        <h2 id="password-modal-title" className="modal-title">
+          {title}
+        </h2>
+        <p className="modal-hint">{help}</p>
+        <div className="modal-fields">
+          <label className="modal-field">
+            <span className="label">
+              {kind === "change" ? "New password" : "Password"}
+            </span>
+            <input
+              type="password"
+              className="input"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              autoFocus
+              autoComplete="new-password"
+              disabled={busy}
+            />
+          </label>
+          {needsConfirm && (
+            <label className="modal-field">
+              <span className="label">Confirm</span>
+              <input
+                type="password"
+                className="input"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                autoComplete="new-password"
+                disabled={busy}
+              />
+            </label>
+          )}
+        </div>
+        {(error || (localError && pw)) && (
+          <p className="modal-error" role="alert">
+            {error ?? localError}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn primary"
+            disabled={busy || !!localError}
+          >
+            {busy
+              ? "Working…"
+              : kind === "unlock"
+                ? "Unlock"
+                : kind === "change"
+                  ? "Change"
+                  : "Encrypt"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function PreferencesModal({
+  open,
+  settings,
+  workspaceMeta,
+  workspaceFileBasename,
+  isDefaultWorkspace,
+  onClose,
+  onSaved,
+  onWorkspaceMetaSaved,
+  onError,
+}: {
+  open: boolean;
+  settings: AppSettings | null;
+  workspaceMeta: WorkspaceMeta | null;
+  workspaceFileBasename: string;
+  isDefaultWorkspace: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  onWorkspaceMetaSaved: () => void;
+  onError: (message: string) => void;
+}) {
+  const [activeSection, setActiveSection] =
+    useState<PreferenceSectionId>("general");
+  const [folderDraft, setFolderDraft] = useState<string>("");
+  const [savingFolder, setSavingFolder] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState<string>("");
+  const [savingDisplayName, setSavingDisplayName] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [cloudProbes, setCloudProbes] = useState<CloudFolderProbe[]>([]);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [adoptBusy, setAdoptBusy] = useState<string | null>(null);
+
+  const refreshCloudProbes = useCallback(async () => {
+    setCloudBusy(true);
+    try {
+      const probes = await invoke<CloudFolderProbe[]>("detect_cloud_folders");
+      setCloudProbes(probes);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setCloudBusy(false);
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    if (open) {
+      setFolderDraft(settings?.defaultFolder ?? "");
+      setDisplayNameDraft(workspaceMeta?.displayName ?? "");
+      setActiveSection("general");
+      setShowDiagnostics(false);
+      void refreshCloudProbes();
+    }
+  }, [open, settings?.defaultFolder, workspaceMeta?.displayName, refreshCloudProbes]);
+
+  useModalEscape(open, onClose);
+
+  if (!open) return null;
+
+  const currentFolder = settings?.defaultFolder ?? "";
+  const trimmed = folderDraft.trim();
+  const folderDirty = trimmed !== currentFolder.trim();
+
+  const persistFolder = async (next: string) => {
+    setSavingFolder(true);
+    try {
+      await invoke("set_default_folder", { newPath: next });
+      onSaved();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setSavingFolder(false);
+    }
+  };
+
+  const onBrowse = async () => {
+    setPickingFolder(true);
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        defaultPath: trimmed || currentFolder || undefined,
+      });
+      const next = typeof picked === "string" ? picked : null;
+      if (!next) return;
+      setFolderDraft(next);
+      await persistFolder(next);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setPickingFolder(false);
+    }
+  };
+
+  const onApplyFolder = async () => {
+    if (!folderDirty || !trimmed) return;
+    await persistFolder(trimmed);
+  };
+
+  const onAdoptCloud = async (probe: CloudFolderProbe, migrate: boolean) => {
+    setAdoptBusy(probe.path);
+    try {
+      const [copied, dest] = await invoke<[number, string]>(
+        "adopt_default_folder",
+        { newPath: probe.path, migrate },
+      );
+      setFolderDraft(dest);
+      onSaved();
+      await refreshCloudProbes();
+      if (migrate && copied > 0) {
+        // Surface a non-blocking confirmation so the user can see what
+        // moved without us imposing yet another modal.
+        onError(
+          `Copied ${copied} workspace${copied === 1 ? "" : "s"} into ${probe.provider}.`,
+        );
+      }
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setAdoptBusy(null);
+    }
+  };
+
+  const currentDisplayName = workspaceMeta?.displayName ?? "";
+  const trimmedDisplayName = displayNameDraft.trim();
+  const displayNameDirty = trimmedDisplayName !== currentDisplayName.trim();
+
+  const onApplyDisplayName = async () => {
+    if (!displayNameDirty) return;
+    setSavingDisplayName(true);
+    try {
+      const next = trimmedDisplayName.length > 0 ? trimmedDisplayName : null;
+      await invoke("set_workspace_display_name", { displayName: next });
+      onWorkspaceMetaSaved();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setSavingDisplayName(false);
+    }
+  };
+
+  const onClearDisplayName = async () => {
+    setSavingDisplayName(true);
+    try {
+      await invoke("set_workspace_display_name", { displayName: null });
+      setDisplayNameDraft("");
+      onWorkspaceMetaSaved();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setSavingDisplayName(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card preferences-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preferences-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="preferences-header">
+          <h2 id="preferences-title" className="modal-title">
+            Preferences
+          </h2>
+          <button
+            type="button"
+            className="btn ghost preferences-close"
+            onClick={onClose}
+            aria-label="Close preferences"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="preferences-body">
+          <nav className="preferences-nav" aria-label="Preference sections">
+            <ul>
+              {PREFERENCE_SECTIONS.map((section) => (
+                <li key={section.id}>
+                  <button
+                    type="button"
+                    className={`preferences-nav-item${
+                      activeSection === section.id ? " is-active" : ""
+                    }`}
+                    onClick={() => setActiveSection(section.id)}
+                  >
+                    {section.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <section className="preferences-panel" aria-live="polite">
+            {activeSection === "general" && (
+              <>
+                <header className="preferences-panel-head">
+                  <h3>General</h3>
+                  <p className="muted">
+                    {
+                      PREFERENCE_SECTIONS.find((s) => s.id === "general")!
+                        .description
+                    }
+                  </p>
+                </header>
+                <div className="preferences-field">
+                  <label className="preferences-label" htmlFor="prefs-default-folder">
+                    Default folder
+                  </label>
+                  <p className="muted preferences-help">
+                    Where mimo saves new files and looks for your library.
+                  </p>
+                  <div className="preferences-folder-row">
+                    <input
+                      id="prefs-default-folder"
+                      className="input preferences-folder-input"
+                      value={folderDraft}
+                      onChange={(e) => setFolderDraft(e.target.value)}
+                      placeholder="~/Documents/Budget"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => void onBrowse()}
+                      disabled={pickingFolder || savingFolder}
+                    >
+                      {pickingFolder ? "Choosing…" : "Browse…"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => void onApplyFolder()}
+                      disabled={!folderDirty || !trimmed || savingFolder}
+                    >
+                      {savingFolder ? "Saving…" : "Apply"}
+                    </button>
+                  </div>
+                  {currentFolder && !folderDirty && (
+                    <p className="muted preferences-status">
+                      Current: <code>{currentFolder}</code>
+                    </p>
+                  )}
+                </div>
+
+                <div className="preferences-field">
+                  <label className="preferences-label" htmlFor="prefs-display-name">
+                    Workspace name
+                  </label>
+                  <p className="muted preferences-help">
+                    A friendly label for this file. Shown in the sidebar and
+                    the window title. Leave blank to use the file name (
+                    <code>{workspaceFileBasename}</code>).
+                  </p>
+                  <div className="preferences-folder-row">
+                    <input
+                      id="prefs-display-name"
+                      className="input preferences-folder-input"
+                      value={displayNameDraft}
+                      onChange={(e) => setDisplayNameDraft(e.target.value)}
+                      placeholder={workspaceFileBasename}
+                      spellCheck={false}
+                      disabled={isDefaultWorkspace || savingDisplayName}
+                    />
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => void onClearDisplayName()}
+                      disabled={
+                        isDefaultWorkspace ||
+                        savingDisplayName ||
+                        currentDisplayName.length === 0
+                      }
+                      title="Use the file name"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => void onApplyDisplayName()}
+                      disabled={
+                        isDefaultWorkspace ||
+                        savingDisplayName ||
+                        !displayNameDirty
+                      }
+                    >
+                      {savingDisplayName ? "Saving…" : "Apply"}
+                    </button>
+                  </div>
+                  {isDefaultWorkspace && (
+                    <p className="muted preferences-status">
+                      Save this workspace to a file before naming it.
+                    </p>
+                  )}
+                </div>
+
+                <div className="preferences-field">
+                  <div className="preferences-cloud-head">
+                    <label className="preferences-label">Cloud folders</label>
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => void refreshCloudProbes()}
+                      disabled={cloudBusy}
+                    >
+                      {cloudBusy ? "Scanning…" : "Rescan"}
+                    </button>
+                  </div>
+                  <p className="muted preferences-help">
+                    Detected cloud-storage folders on this Mac. Adopting one
+                    points mimo at it for new and existing files. Migration
+                    copies your library — originals stay put for safety.
+                  </p>
+                  {cloudProbes.length === 0 ? (
+                    <p className="muted preferences-status">
+                      {cloudBusy
+                        ? "Looking…"
+                        : "No cloud folders detected yet."}
+                    </p>
+                  ) : (
+                    <ul className="preferences-cloud-list">
+                      {cloudProbes.map((probe) => {
+                        const busy = adoptBusy === probe.path;
+                        return (
+                          <li
+                            key={`${probe.provider}::${probe.path}`}
+                            className={`preferences-cloud-row ${
+                              probe.isDefault ? "is-default" : ""
+                            } ${probe.exists ? "" : "is-missing"}`}
+                          >
+                            <div className="preferences-cloud-info">
+                              <div className="preferences-cloud-provider">
+                                {probe.provider}
+                                {probe.isDefault && (
+                                  <span className="preferences-cloud-tag">
+                                    current default
+                                  </span>
+                                )}
+                                {!probe.exists && (
+                                  <span className="preferences-cloud-tag muted">
+                                    not installed
+                                  </span>
+                                )}
+                              </div>
+                              <code className="preferences-cloud-path">
+                                {probe.path}
+                              </code>
+                              {probe.exists && (
+                                <span className="muted preferences-cloud-meta">
+                                  {probe.workspaceCount} workspace
+                                  {probe.workspaceCount === 1 ? "" : "s"} here
+                                </span>
+                              )}
+                            </div>
+                            <div className="preferences-cloud-actions">
+                              {probe.exists && !probe.isDefault && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn secondary"
+                                    onClick={() =>
+                                      void onAdoptCloud(probe, false)
+                                    }
+                                    disabled={busy}
+                                    title="Switch the default folder without copying files"
+                                  >
+                                    Use as default
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn primary"
+                                    onClick={() =>
+                                      void onAdoptCloud(probe, true)
+                                    }
+                                    disabled={busy}
+                                    title="Switch and copy existing files (originals preserved)"
+                                  >
+                                    {busy ? "Migrating…" : "Migrate here"}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="preferences-field preferences-diagnostics">
+                  <button
+                    type="button"
+                    className="btn-link preferences-diagnostics-toggle"
+                    onClick={() => setShowDiagnostics((v) => !v)}
+                    aria-expanded={showDiagnostics}
+                  >
+                    {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
+                  </button>
+                  {showDiagnostics && (
+                    <dl className="preferences-diagnostics-list">
+                      <dt>Workspace ID</dt>
+                      <dd>
+                        <code>{workspaceMeta?.fileUuid || "—"}</code>
+                      </dd>
+                      <dt>Schema version</dt>
+                      <dd>
+                        <code>
+                          {workspaceMeta?.schemaVersion ?? "—"}
+                        </code>
+                      </dd>
+                      <dt>Created</dt>
+                      <dd>
+                        <code>{workspaceMeta?.createdAt || "—"}</code>
+                      </dd>
+                      <dt>Last updated</dt>
+                      <dd>
+                        <code>{workspaceMeta?.updatedAt || "—"}</code>
+                      </dd>
+                    </dl>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+        <div className="modal-actions preferences-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateYearModal({
   open,
   defaultYear,
+  busy,
+  existingLabels,
   onCancel,
   onCreate,
 }: {
   open: boolean;
   defaultYear: number;
+  busy: boolean;
+  existingLabels: string[];
   onCancel: () => void;
-  onCreate: (label: string, scaffoldYear: number) => void;
+  onCreate: (label: string) => void;
 }) {
   const [label, setLabel] = useState(String(defaultYear));
-  const [scaffold, setScaffold] = useState(true);
+  const [touched, setTouched] = useState(false);
   useEffect(() => {
     if (open) {
       setLabel(String(defaultYear));
-      setScaffold(true);
+      setTouched(false);
     }
   }, [open, defaultYear]);
+  useModalEscape(open && !busy, onCancel);
   if (!open) return null;
+  const trimmed = label.trim();
+  const validShape = /^\d{4}$/.test(trimmed);
+  const dup = existingLabels.includes(trimmed);
+  const error = !trimmed
+    ? "Enter a 4-digit year"
+    : !validShape
+    ? "Use a 4-digit year (e.g. 2026)"
+    : dup
+    ? "That year already exists in this file"
+    : null;
+  const submit = () => {
+    if (error) {
+      setTouched(true);
+      return;
+    }
+    onCreate(trimmed);
+  };
+  const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  };
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
-      <div
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <form
         className="modal-card"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-year-title"
         onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        noValidate
       >
         <h2 id="new-year-title" className="modal-title">
-          New year budget
+          New year
         </h2>
         <p className="modal-hint">
-          A `.budget` file will be created in your default folder. The label becomes the
-          filename and shows up in the sidebar.
+          January through December will be created automatically. You can
+          rename or delete the year later.
         </p>
         <div className="modal-fields">
-          <label className="field-inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
-            <span className="label">Year label</span>
+          <label className="modal-field">
+            <span className="label">Year</span>
             <input
               className="input"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
+              onBlur={() => setTouched(true)}
               autoFocus
-              placeholder="e.g. 2026 or House fund 2026"
+              placeholder="e.g. 2026"
+              maxLength={4}
+              inputMode="numeric"
             />
           </label>
-          <label className="field-inline" style={{ marginTop: 8 }}>
-            <input
-              type="checkbox"
-              checked={scaffold}
-              onChange={(e) => setScaffold(e.target.checked)}
-            />
-            <span className="label">Pre-populate Jan–Dec months</span>
-          </label>
+          {touched && error && <p className="modal-error">{error}</p>}
         </div>
         <div className="modal-actions">
-          <button type="button" className="btn secondary" onClick={onCancel}>
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={handleCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="btn primary" disabled={busy || !!error}>
+            {busy ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RenameYearModal({
+  open,
+  initial,
+  busy,
+  existingLabels,
+  onCancel,
+  onSubmit,
+}: {
+  open: boolean;
+  initial: string;
+  busy: boolean;
+  existingLabels: string[];
+  onCancel: () => void;
+  onSubmit: (label: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setValue(initial);
+      setTouched(false);
+    }
+  }, [open, initial]);
+  useModalEscape(open && !busy, onCancel);
+  if (!open) return null;
+  const trimmed = value.trim();
+  const validShape = /^\d{4}$/.test(trimmed);
+  const dup = trimmed !== initial && existingLabels.includes(trimmed);
+  const error = !trimmed
+    ? "Enter a 4-digit year"
+    : !validShape
+    ? "Use a 4-digit year (e.g. 2026)"
+    : dup
+    ? "That year already exists in this file"
+    : null;
+  const submit = () => {
+    if (error) {
+      setTouched(true);
+      return;
+    }
+    if (trimmed === initial) {
+      onCancel();
+      return;
+    }
+    onSubmit(trimmed);
+  };
+  const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <form
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-year-title"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        noValidate
+      >
+        <h2 id="rename-year-title" className="modal-title">
+          Rename year
+        </h2>
+        <p className="modal-hint">
+          Months keep their data; only the year label and slug change.
+        </p>
+        <div className="modal-fields">
+          <label className="modal-field">
+            <span className="label">Year</span>
+            <input
+              className="input"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onBlur={() => setTouched(true)}
+              autoFocus
+              maxLength={4}
+              inputMode="numeric"
+            />
+          </label>
+          {touched && error && <p className="modal-error">{error}</p>}
+        </div>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={handleCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="btn primary" disabled={busy || !!error}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function DeleteYearConfirmModal({
+  open,
+  yearLabel,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  yearLabel: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useModalEscape(open && !busy, onCancel);
+  if (!open) return null;
+  const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="del-year-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="del-year-title" className="modal-title">
+          Delete year {yearLabel}?
+        </h2>
+        <p className="modal-hint">
+          All 12 months, transactions, and entries for {yearLabel} will be removed from this
+          file. This can't be undone, but you can still recover from a recent autosave or
+          backup.
+        </p>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={handleCancel}
+            disabled={busy}
+          >
             Cancel
           </button>
           <button
             type="button"
-            className="btn primary"
-            onClick={() => {
-              const trimmed = label.trim();
-              if (!trimmed) return;
-              const yearMatch = /\b(19|20|21)\d{2}\b/.exec(trimmed);
-              const yr = yearMatch ? Number(yearMatch[0]) : defaultYear;
-              onCreate(trimmed, scaffold ? yr : 0);
-            }}
+            className="btn danger"
+            onClick={onConfirm}
+            disabled={busy}
           >
-            Create
+            {busy ? "Deleting…" : "Delete year"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DuplicateYearModal({
+  open,
+  sourceYear,
+  sourceMonths,
+  busy,
+  existingLabels,
+  onCancel,
+  onSubmit,
+}: {
+  open: boolean;
+  sourceYear: YearRow | null;
+  sourceMonths: MonthRow[];
+  busy: boolean;
+  existingLabels: string[];
+  onCancel: () => void;
+  onSubmit: (args: DuplicateYearArgs) => void;
+}) {
+  const initialDest = useMemo(() => {
+    if (!sourceYear) return "";
+    const n = Number(sourceYear.yearLabel);
+    return Number.isFinite(n) ? String(n + 1) : "";
+  }, [sourceYear]);
+  const [destLabel, setDestLabel] = useState(initialDest);
+  const [mode, setMode] = useState<"perMonth" | "singleSource">("perMonth");
+  const calendarMonths = useMemo(
+    () =>
+      [...sourceMonths]
+        .filter((m) => m.calendarMonth != null)
+        .sort((a, b) => (a.calendarMonth ?? 99) - (b.calendarMonth ?? 99)),
+    [sourceMonths],
+  );
+  const [sourceMonthId, setSourceMonthId] = useState<number | null>(
+    calendarMonths[0]?.id ?? null,
+  );
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setDestLabel(initialDest);
+      setMode("perMonth");
+      setSourceMonthId(calendarMonths[0]?.id ?? null);
+      setTouched(false);
+    }
+  }, [open, initialDest, calendarMonths]);
+  useModalEscape(open && !busy, onCancel);
+  if (!open || !sourceYear) return null;
+  const trimmed = destLabel.trim();
+  const validShape = /^\d{4}$/.test(trimmed);
+  const dup = existingLabels.includes(trimmed);
+  const sameAsSource = trimmed === sourceYear.yearLabel;
+  const needsMonth = mode === "singleSource" && sourceMonthId == null;
+  const error = !trimmed
+    ? "Enter a destination year"
+    : !validShape
+    ? "Use a 4-digit year (e.g. 2027)"
+    : dup
+    ? "That year already exists in this file"
+    : sameAsSource
+    ? "Pick a different year than the source"
+    : needsMonth
+    ? "Choose a source month"
+    : null;
+  const submit = () => {
+    if (error) {
+      setTouched(true);
+      return;
+    }
+    onSubmit({
+      destYearLabel: trimmed,
+      mode,
+      sourceMonthId: mode === "singleSource" ? sourceMonthId ?? undefined : undefined,
+    });
+  };
+  const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <form
+        className="modal-card line-edit-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dup-year-title"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        noValidate
+      >
+        <h2 id="dup-year-title" className="modal-title">
+          Duplicate year {sourceYear.yearLabel}
+        </h2>
+        <p className="modal-hint">
+          Copies the bucket structure and projected amounts into a brand-new year.
+          Actuals (transactions and income entries) are not copied.
+        </p>
+        <div className="modal-fields">
+          <label className="modal-field">
+            <span className="label">Destination year</span>
+            <input
+              className="input"
+              value={destLabel}
+              onChange={(e) => setDestLabel(e.target.value)}
+              onBlur={() => setTouched(true)}
+              maxLength={4}
+              inputMode="numeric"
+              autoFocus
+            />
+          </label>
+
+          <label className="line-edit-toggle">
+            <input
+              type="radio"
+              name="dup-year-mode"
+              checked={mode === "perMonth"}
+              onChange={() => setMode("perMonth")}
+            />
+            <span>
+              <span className="line-edit-toggle-label">Copy each month one-to-one</span>
+              <span className="line-edit-toggle-hint">
+                January's projections fill the new January, February → February, and so on.
+              </span>
+            </span>
+          </label>
+          <label className="line-edit-toggle">
+            <input
+              type="radio"
+              name="dup-year-mode"
+              checked={mode === "singleSource"}
+              onChange={() => setMode("singleSource")}
+            />
+            <span>
+              <span className="line-edit-toggle-label">
+                Use a single source month for all 12 months
+              </span>
+              <span className="line-edit-toggle-hint">
+                Pick one month below; its projections are copied into every month of the new year.
+              </span>
+            </span>
+          </label>
+
+          {mode === "singleSource" && (
+            <label className="modal-field">
+              <span className="label">Source month</span>
+              <select
+                className="input"
+                value={sourceMonthId ?? ""}
+                onChange={(e) => setSourceMonthId(Number(e.target.value) || null)}
+              >
+                {calendarMonths.length === 0 && (
+                  <option value="">(no calendar months in source year)</option>
+                )}
+                {calendarMonths.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.calendarMonth != null ? MONTH_NAMES_FULL[m.calendarMonth - 1] : m.tabLabel}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {touched && error && <p className="modal-error">{error}</p>}
+        </div>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={handleCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="btn primary" disabled={busy || !!error}>
+            {busy ? "Duplicating…" : "Duplicate"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function YtdDualStrip({ view }: { view: MonthView }) {
+  return (
+    <section
+      className="ytd-dual ytd-single"
+      aria-label="Year-to-date totals for the active month"
+    >
+      <div className="ytd-dual-header">
+        <h2 className="ytd-dual-title">Year-to-date · {view.ytd.year}</h2>
+      </div>
+      <div className="ytd-dual-grid">
+        <div className="ytd-dual-card">
+          <div className="ytd-dual-stats">
+            <div>
+              <div className="ytd-label">Income</div>
+              <div className="ytd-value">
+                {formatUsd(view.ytd.incomeActualCents, "rounded")}
+              </div>
+            </div>
+            <div>
+              <div className="ytd-label">Expenses (net)</div>
+              <div className="ytd-value">
+                {formatUsd(view.ytd.expenseNetActualCents, "rounded")}
+              </div>
+            </div>
+            <div>
+              <div className="ytd-label">Net</div>
+              <div
+                className={`ytd-value ${
+                  view.ytd.netActualCents < 0 ? "neg" : "pos"
+                }`}
+              >
+                {formatUsd(view.ytd.netActualCents, "rounded")}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Small split-button: click the main face for the default (detailed) export,
+// click the caret for the picker that exposes the redacted variant. Keeps the
+// happy path one click and tucks the privacy-sensitive option behind a
+// disclosure so first-time users aren't paralyzed by the choice.
+function ExportPickerButton({
+  label,
+  onDetailed,
+  onRedacted,
+  formatLabel,
+}: {
+  label: string;
+  onDetailed: () => void;
+  onRedacted: () => void;
+  formatLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const choose = (kind: "detailed" | "redacted") => {
+    setOpen(false);
+    if (kind === "detailed") onDetailed();
+    else onRedacted();
+  };
+
+  return (
+    <div className="export-split" ref={wrapRef}>
+      <button
+        type="button"
+        className="btn ghost export-split-main"
+        onClick={onDetailed}
+        title={`${label} (detailed)`}
+      >
+        {label}
+      </button>
+      <button
+        type="button"
+        className="btn ghost export-split-caret"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={`${formatLabel} export options`}
+      >
+        ▾
+      </button>
+      {open && (
+        <div className="export-split-menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            className="export-split-item"
+            onClick={() => choose("detailed")}
+          >
+            <span className="export-split-item-title">Detailed</span>
+            <span className="export-split-item-help">
+              Includes payees, transactions, and entry labels.
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="export-split-item"
+            onClick={() => choose("redacted")}
+          >
+            <span className="export-split-item-title">Redacted</span>
+            <span className="export-split-item-help">
+              Buckets, lines, and totals only. Safe to share.
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2165,10 +3899,14 @@ function MonthBudgetView({
   onToggleExpense,
   onRefresh,
   onAddRow,
-  onRenameRow,
+  onEditRow,
   onDeleteRow,
   onOpenReorder,
   onOpenLineYtd,
+  onExportCsv,
+  onExportJson,
+  onExportCsvRedacted,
+  onExportJsonRedacted,
 }: {
   view: MonthView;
   expandedIncome: Set<number>;
@@ -2177,7 +3915,7 @@ function MonthBudgetView({
   onToggleExpense: (id: number) => void;
   onRefresh: () => void;
   onAddRow: (bucketId: number) => void;
-  onRenameRow: (lineId: number, name: string) => void;
+  onEditRow: (lineId: number) => void;
   onDeleteRow: (lineId: number, name: string) => void;
   onOpenReorder: () => void;
   onOpenLineYtd: (args: {
@@ -2186,33 +3924,33 @@ function MonthBudgetView({
     year: number;
     asOf: string | null;
   }) => void;
+  onExportCsv: () => void;
+  onExportJson: () => void;
+  onExportCsvRedacted: () => void;
+  onExportJsonRedacted: () => void;
 }) {
   return (
     <>
       <header className="month-view-header">
         <h1>{view.tabLabel}</h1>
-        <p className="muted">
-          {view.periodStart} → {view.periodEnd}
-        </p>
+        <div className="month-view-toolbar">
+          <ExportPickerButton
+            label="Export CSV"
+            formatLabel="CSV"
+            onDetailed={onExportCsv}
+            onRedacted={onExportCsvRedacted}
+          />
+          <ExportPickerButton
+            label="Export JSON"
+            formatLabel="JSON"
+            onDetailed={onExportJson}
+            onRedacted={onExportJsonRedacted}
+          />
+        </div>
       </header>
 
-      <section className="ytd-strip" aria-label="Year-to-date totals for the active month">
-        <div>
-          <div className="ytd-label">YTD income (actual)</div>
-          <div className="ytd-value">{formatUsd(view.ytd.incomeActualCents, "rounded")}</div>
-        </div>
-        <div>
-          <div className="ytd-label">YTD expenses (net)</div>
-          <div className="ytd-value">{formatUsd(view.ytd.expenseNetActualCents, "rounded")}</div>
-        </div>
-        <div>
-          <div className="ytd-label">YTD net</div>
-          <div className="ytd-value">{formatUsd(view.ytd.netActualCents, "rounded")}</div>
-        </div>
-        <div className="ytd-meta">
-          Calendar {view.ytd.year} through {view.ytd.throughMonth}
-        </div>
-      </section>
+      <YtdDualStrip view={view} />
+
 
       <section className="card summary-card">
         <h2>Monthly summary</h2>
@@ -2258,6 +3996,7 @@ function MonthBudgetView({
             <tr>
               <th>Line</th>
               <th className="num">Planned</th>
+              <th className="num">Rollover in</th>
               <th className="num">Actual</th>
               <th className="num">Difference</th>
               <th />
@@ -2319,7 +4058,7 @@ function MonthBudgetView({
                   expanded={expandedExpense.has(line.id)}
                   onToggle={() => onToggleExpense(line.id)}
                   onRefresh={onRefresh}
-                  onRename={() => onRenameRow(line.id, line.name)}
+                  onEdit={() => onEditRow(line.id)}
                   onDelete={() => onDeleteRow(line.id, line.name)}
                   onOpenYtd={() =>
                     onOpenLineYtd({
@@ -2350,29 +4089,64 @@ function MonthBudgetView({
 
 export default function App() {
   const [months, setMonths] = useState<MonthRow[]>([]);
+  const [years, setYears] = useState<YearRow[]>([]);
+  const [sidebarYearId, setSidebarYearId] = useState<number | null>(null);
   const [view, setView] = useState<AppView>({ kind: "welcome" });
   const [monthView, setMonthView] = useState<MonthView | null>(null);
   const [yearOverview, setYearOverview] = useState<YearOverview | null>(null);
-  const [workspaceMeta, setWorkspaceMeta] = useState<WorkspaceMeta | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [libraryEntries, setLibraryEntries] = useState<LibraryEntry[]>([]);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [externalRename, setExternalRename] = useState<ExternalRenameInfo | null>(null);
-  const [newYearOpen, setNewYearOpen] = useState(false);
+  const [createYearOpen, setCreateYearOpen] = useState(false);
+  const [createYearBusy, setCreateYearBusy] = useState(false);
+  const [renameYearTarget, setRenameYearTarget] = useState<YearRow | null>(null);
+  const [renameYearBusy, setRenameYearBusy] = useState(false);
+  const [deleteYearTarget, setDeleteYearTarget] = useState<YearRow | null>(null);
+  const [deleteYearBusy, setDeleteYearBusy] = useState(false);
+  const [duplicateYearTarget, setDuplicateYearTarget] = useState<YearRow | null>(null);
+  const [duplicateYearBusy, setDuplicateYearBusy] = useState(false);
+  const [duplicateYearMonths, setDuplicateYearMonths] = useState<MonthRow[]>([]);
   const [isDefaultWorkspace, setIsDefaultWorkspace] = useState(true);
+  const [workspaceMeta, setWorkspaceMeta] = useState<WorkspaceMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [expandedIncome, setExpandedIncome] = useState<Set<number>>(new Set());
   const [expandedExpense, setExpandedExpense] = useState<Set<number>>(new Set());
   const [dbPath, setDbPath] = useState<string>("");
-  const [periodModal, setPeriodModal] = useState<PeriodModalConfig | null>(null);
   const [reorderModalOpen, setReorderModalOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [passwordModal, setPasswordModal] = useState<PasswordModalKind | null>(
+    null,
+  );
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [encryptionAvailable, setEncryptionAvailable] = useState(false);
+  const [workspaceEncrypted, setWorkspaceEncrypted] = useState(false);
+  const encryptionAvailableRef = useRef(false);
+  const workspaceEncryptedRef = useRef(false);
+  useEffect(() => {
+    encryptionAvailableRef.current = encryptionAvailable;
+  }, [encryptionAvailable]);
+  useEffect(() => {
+    workspaceEncryptedRef.current = workspaceEncrypted;
+  }, [workspaceEncrypted]);
   const [autoSaveOn, setAutoSaveOn] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [snapshotState, setSnapshotState] = useState<{
+    busy: boolean;
+    lastAt: number | null;
+  }>({ busy: false, lastAt: null });
+  const [saveToast, setSaveToast] = useState<string | null>(null);
   const [unsavedPromptOpen, setUnsavedPromptOpen] = useState(false);
   const [unsavedBusy, setUnsavedBusy] = useState(false);
+  const [lineEditConfig, setLineEditConfig] = useState<ExpenseLineEditConfig | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    lineId: number;
+    name: string;
+  } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [ytdDrawer, setYtdDrawer] = useState<{
     lineKind: "income" | "expense";
     lineIdentity: string;
@@ -2382,10 +4156,14 @@ export default function App() {
   const [ytdReport, setYtdReport] = useState<LineCalendarReport | null>(null);
   const [ytdLoading, setYtdLoading] = useState(false);
   const [reportsInitial, setReportsInitial] = useState<ReportsViewSeed | null>(null);
+  const [crossYear, setCrossYear] = useState<CrossYearOverview | null>(null);
+  const [crossYearLoading, setCrossYearLoading] = useState(false);
 
   const monthsRef = useRef<MonthRow[]>([]);
   const viewRef = useRef<AppView>(view);
   const monthViewRef = useRef<MonthView | null>(null);
+  const sidebarYearIdRef = useRef<number | null>(null);
+  const yearsRef = useRef<YearRow[]>([]);
   useEffect(() => {
     monthsRef.current = months;
   }, [months]);
@@ -2395,6 +4173,12 @@ export default function App() {
   useEffect(() => {
     monthViewRef.current = monthView;
   }, [monthView]);
+  useEffect(() => {
+    sidebarYearIdRef.current = sidebarYearId;
+  }, [sidebarYearId]);
+  useEffect(() => {
+    yearsRef.current = years;
+  }, [years]);
 
   useEffect(() => {
     if (!ytdDrawer) {
@@ -2423,6 +4207,20 @@ export default function App() {
     };
   }, [ytdDrawer]);
 
+  // Keep the OS window title in sync with whatever label we're currently
+  // showing in the sidebar workspace chip (display name override or file
+  // basename). Rust sets a reasonable initial title at window creation; this
+  // effect handles the runtime changes (display_name edits, file rename, save
+  // as, etc.) without requiring a round-trip back to the backend.
+  useEffect(() => {
+    if (loading) return;
+    const label =
+      !isDefaultWorkspace && workspaceMeta?.displayName
+        ? workspaceMeta.displayName
+        : basenameNoExt(dbPath) || "mimo";
+    void getCurrentWindow().setTitle(`mimo — ${label}`);
+  }, [loading, isDefaultWorkspace, workspaceMeta?.displayName, dbPath]);
+
   const toggleIncome = (id: number) => {
     setExpandedIncome((prev) => {
       const n = new Set(prev);
@@ -2447,26 +4245,29 @@ export default function App() {
     setMonthView(v);
   }, []);
 
-  const refreshOverview = useCallback(async () => {
+  const refreshOverview = useCallback(async (yearId?: number | null) => {
     setError(null);
-    const o = await invoke<YearOverview>("get_year_overview");
+    const target = yearId === undefined ? sidebarYearIdRef.current : yearId;
+    const o = await invoke<YearOverview>("get_year_overview", { yearId: target ?? null });
     setYearOverview(o);
   }, []);
 
-  const refreshMonths = useCallback(async () => {
-    const list = await invoke<MonthRow[]>("list_months");
+  const refreshMonths = useCallback(async (yearId?: number | null) => {
+    const target = yearId === undefined ? sidebarYearIdRef.current : yearId;
+    let list: MonthRow[];
+    if (target != null) {
+      list = await invoke<MonthRow[]>("list_months_for_year", { yearId: target });
+    } else {
+      list = await invoke<MonthRow[]>("list_months");
+    }
     setMonths(list);
     return list;
   }, []);
 
-  const refreshWorkspaceMeta = useCallback(async () => {
-    try {
-      const meta = await invoke<WorkspaceMeta>("get_workspace_meta");
-      setWorkspaceMeta(meta);
-      return meta;
-    } catch {
-      return null;
-    }
+  const refreshYears = useCallback(async () => {
+    const list = await invoke<YearRow[]>("list_years");
+    setYears(list);
+    return list;
   }, []);
 
   const refreshSettings = useCallback(async () => {
@@ -2475,6 +4276,20 @@ export default function App() {
     setSidebarCollapsed(Boolean(s.sidebarCollapsed));
     setRecentFiles(s.recentFiles ?? []);
     return s;
+  }, []);
+
+  const refreshWorkspaceMeta = useCallback(async () => {
+    try {
+      const meta = await invoke<WorkspaceMeta>("get_workspace_meta");
+      setWorkspaceMeta(meta);
+      return meta;
+    } catch (e) {
+      // Best effort: leave the previous value in place so the UI never blanks
+      // out the workspace title just because of a transient connection issue.
+      // Surface the error so the user knows something is off.
+      setError(String(e));
+      return null;
+    }
   }, []);
 
   const refreshLibrary = useCallback(async () => {
@@ -2498,17 +4313,6 @@ export default function App() {
     }
   }, []);
 
-  const checkForExternalRename = useCallback(async () => {
-    try {
-      const info = await invoke<ExternalRenameInfo>("check_external_rename");
-      if (!info.isDefaultWorkspace && !info.matches && info.fileBasename.trim() !== "") {
-        setExternalRename(info);
-      }
-    } catch {
-      // ignore — best effort
-    }
-  }, []);
-
   const bootstrap = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -2518,41 +4322,74 @@ export default function App() {
       const isDefault = await invoke<boolean>("is_default_workspace");
       setIsDefaultWorkspace(isDefault);
 
-      const [list, meta, s] = await Promise.all([
-        refreshMonths(),
-        refreshWorkspaceMeta(),
-        refreshSettings(),
-      ]);
+      // Detect whether the active file is encrypted before issuing any
+      // schema queries. The backend opens lazily, so this avoids the
+      // first command throwing an "ENCRYPTED:" error mid-bootstrap.
+      try {
+        const supported = await invoke<boolean>("encryption_supported");
+        setEncryptionAvailable(supported);
+      } catch {
+        // best effort
+      }
+      try {
+        const enc = await invoke<boolean>("workspace_is_encrypted", { path });
+        setWorkspaceEncrypted(enc);
+        if (enc) {
+          setPasswordError(null);
+          setPasswordModal("unlock");
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // best effort - if the probe fails we'll fall back to the
+        // ENCRYPTED-error branch below on the first real command.
+      }
+
+      const [initialYears, s] = await Promise.all([refreshYears(), refreshSettings()]);
+      void refreshWorkspaceMeta();
       const autoSave = await invoke<boolean>("get_auto_save");
       setAutoSaveOn(autoSave);
       void refreshLibrary();
 
-      const hasYearLabel = !!meta?.yearLabel?.trim();
-      const hasMonths = list.length > 0;
-      const hasWorkspaceContent = !isDefault || hasYearLabel || hasMonths;
-
-      if (!hasWorkspaceContent) {
-        setView({ kind: "welcome" });
-      } else {
-        await refreshOverview();
-        setView({ kind: "overview" });
+      // Backfill: ensure every existing year has all 12 calendar months. This is
+      // a one-shot reconcile that legacy files (pre-v3) will benefit from.
+      let yearList = initialYears;
+      if (initialYears.length > 0) {
+        for (const y of initialYears) {
+          try {
+            await invoke<number[]>("ensure_year_months", { yearId: y.id });
+          } catch {
+            // ignore — best effort
+          }
+        }
+        yearList = await refreshYears();
       }
 
-      // Settings result kept for parent state — value already applied via refresh.
+      if (yearList.length === 0) {
+        setSidebarYearId(null);
+        setMonths([]);
+        setView({ kind: "welcome" });
+      } else {
+        const firstYear = yearList[0];
+        setSidebarYearId(firstYear.id);
+        await refreshMonths(firstYear.id);
+        await refreshOverview(firstYear.id);
+        setView({ kind: "overview", yearId: firstYear.id });
+      }
+
       void s;
-      await checkForExternalRename();
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
   }, [
+    refreshYears,
     refreshMonths,
-    refreshWorkspaceMeta,
     refreshSettings,
     refreshOverview,
     refreshLibrary,
-    checkForExternalRename,
+    refreshWorkspaceMeta,
   ]);
 
   useEffect(() => {
@@ -2605,8 +4442,9 @@ export default function App() {
     setYtdDrawer(null);
     setBusy(true);
     try {
-      await refreshOverview();
-      setView({ kind: "overview" });
+      const yid = sidebarYearIdRef.current;
+      await refreshOverview(yid);
+      setView({ kind: "overview", yearId: yid });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -2616,16 +4454,17 @@ export default function App() {
 
   const showLibrary = useCallback(async () => {
     setYtdDrawer(null);
-    setBusy(true);
+    // Show cached entries instantly so navigation feels snappy, then kick off a
+    // fresh disk scan in the background so the list reflects any files the user
+    // added/removed/renamed outside the app since last visit.
     try {
       await refreshLibrary();
       setView({ kind: "library" });
     } catch (e) {
       setError(String(e));
-    } finally {
-      setBusy(false);
     }
-  }, [refreshLibrary]);
+    void rescanLibrary();
+  }, [refreshLibrary, rescanLibrary]);
 
   const onReportsInitialApplied = useCallback(() => setReportsInitial(null), []);
 
@@ -2636,6 +4475,27 @@ export default function App() {
     setView({ kind: "reports" });
   }, []);
 
+  const refreshCrossYear = useCallback(async () => {
+    setCrossYearLoading(true);
+    try {
+      const data = await invoke<CrossYearOverview>("get_cross_year_overview");
+      setCrossYear(data);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCrossYearLoading(false);
+    }
+  }, []);
+
+  const showCrossYear = useCallback(async () => {
+    setError(null);
+    setYtdDrawer(null);
+    setSidebarYearId(null);
+    sidebarYearIdRef.current = null;
+    setView({ kind: "cross-year" });
+    await refreshCrossYear();
+  }, [refreshCrossYear]);
+
   const onOpenFile = useCallback(async () => {
     try {
       const defaultDir = settings?.defaultFolder ?? undefined;
@@ -2643,7 +4503,9 @@ export default function App() {
         multiple: false,
         directory: false,
         defaultPath: defaultDir,
-        filters: [{ name: "Budget File", extensions: ["budget", "sqlite3", "db"] }],
+        filters: [
+          { name: "mimo file", extensions: ["mimo", "budget", "sqlite3", "db"] },
+        ],
       });
       const filePath = typeof picked === "string" ? picked : null;
       if (!filePath) return;
@@ -2657,13 +4519,14 @@ export default function App() {
   const onSaveAs = useCallback(async (): Promise<boolean> => {
     try {
       const defaultDir = settings?.defaultFolder ?? undefined;
-      const suggested = workspaceMeta?.yearLabel?.trim() || "budget";
+      const currentBase = basenameNoExt(dbPath);
+      const suggested = currentBase || "mimo";
       const target = await saveDialog({
-        title: "Save budget as",
+        title: "Save as",
         defaultPath: defaultDir
-          ? `${defaultDir}/${suggested}.budget`
-          : `${suggested}.budget`,
-        filters: [{ name: "Budget File", extensions: ["budget"] }],
+          ? `${defaultDir}/${suggested}.mimo`
+          : `${suggested}.mimo`,
+        filters: [{ name: "mimo file", extensions: ["mimo", "budget"] }],
       });
       if (!target) return false;
       await invoke("save_budget_as", { targetPath: target });
@@ -2672,77 +4535,258 @@ export default function App() {
       const isDefault = await invoke<boolean>("is_default_workspace");
       setIsDefaultWorkspace(isDefault);
       void refreshSettings();
+      void refreshWorkspaceMeta();
       return true;
     } catch (e) {
       setError(String(e));
       return false;
     }
-  }, [settings, workspaceMeta, refreshSettings]);
+  }, [settings, dbPath, refreshSettings, refreshWorkspaceMeta]);
 
-  const onSave = useCallback(async () => {
+  const showSaveToast = useCallback((msg: string) => {
+    setSaveToast(msg);
+    window.setTimeout(() => {
+      setSaveToast((cur) => (cur === msg ? null : cur));
+    }, 1800);
+  }, []);
+
+  const onPasswordSubmit = useCallback(
+    async (password: string) => {
+      if (!passwordModal) return;
+      setPasswordBusy(true);
+      setPasswordError(null);
+      try {
+        if (passwordModal === "unlock") {
+          const ok = await invoke<boolean>("unlock_workspace", { password });
+          if (!ok) {
+            setPasswordError("Wrong password — try again.");
+            return;
+          }
+          setWorkspaceEncrypted(true);
+          setPasswordModal(null);
+          await bootstrap();
+        } else if (passwordModal === "set") {
+          await invoke("encrypt_workspace", { password });
+          setWorkspaceEncrypted(true);
+          setPasswordModal(null);
+          showSaveToast("Workspace encrypted");
+        } else if (passwordModal === "change") {
+          await invoke("change_workspace_password", { newPassword: password });
+          setPasswordModal(null);
+          showSaveToast("Password changed");
+        }
+      } catch (e) {
+        setPasswordError(String(e));
+      } finally {
+        setPasswordBusy(false);
+      }
+    },
+    [passwordModal, bootstrap, showSaveToast],
+  );
+
+  const onCmdS = useCallback(async () => {
     try {
       const isDefault = await invoke<boolean>("is_default_workspace");
-      const wrote = isDefault ? await onSaveAs() : true;
-      if (wrote) {
-        setSavedFlash(true);
-        window.setTimeout(() => setSavedFlash(false), 1500);
+      if (isDefault) {
+        await onSaveAs();
+      } else {
+        showSaveToast("Already saved");
       }
     } catch (e) {
       setError(String(e));
     }
-  }, [onSaveAs]);
+  }, [onSaveAs, showSaveToast]);
 
   const onCreateYear = useCallback(() => {
-    setNewYearOpen(true);
+    setCreateYearOpen(true);
   }, []);
 
-  const onCreateYearSubmit = useCallback(
-    async (label: string, scaffoldYearValue: number) => {
-      setNewYearOpen(false);
+  const enterYear = useCallback(
+    async (yearId: number) => {
       setBusy(true);
       try {
-        await invoke("create_year_workspace", {
-          yearLabel: label,
-          scaffoldYearValue: scaffoldYearValue || null,
+        setSidebarYearId(yearId);
+        sidebarYearIdRef.current = yearId;
+        await refreshMonths(yearId);
+        await refreshOverview(yearId);
+        flushSync(() => {
+          setView({ kind: "overview", yearId });
         });
-        void refreshSettings();
       } catch (e) {
         setError(String(e));
       } finally {
         setBusy(false);
       }
     },
-    [refreshSettings],
+    [refreshMonths, refreshOverview],
   );
 
-  const onRenameYear = useCallback(
-    async (next: string) => {
+  const exitYear = useCallback(() => {
+    setSidebarYearId(null);
+    sidebarYearIdRef.current = null;
+    setMonths([]);
+    setYearOverview(null);
+    setView({ kind: "overview", yearId: null });
+  }, []);
+
+  const onCreateYearSubmit = useCallback(
+    async (label: string) => {
+      setCreateYearBusy(true);
       try {
-        const newPath = await invoke<string>("set_workspace_year", { yearLabel: next });
-        setDbPath(newPath);
-        const isDefault = await invoke<boolean>("is_default_workspace");
-        setIsDefaultWorkspace(isDefault);
-        await refreshWorkspaceMeta();
-        void refreshSettings();
+        const newId = await invoke<number>("create_year", { yearLabel: label });
+        await refreshYears();
+        setCreateYearOpen(false);
+        await enterYear(newId);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setCreateYearBusy(false);
+      }
+    },
+    [refreshYears, enterYear],
+  );
+
+  const onRenameYearSubmit = useCallback(
+    async (label: string) => {
+      const target = renameYearTarget;
+      if (!target) return;
+      setRenameYearBusy(true);
+      try {
+        await invoke<string>("rename_year", { yearId: target.id, yearLabel: label });
+        setRenameYearTarget(null);
+        await refreshYears();
+        const yid = sidebarYearIdRef.current;
+        if (yid != null) {
+          await refreshMonths(yid);
+          await refreshOverview(yid);
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setRenameYearBusy(false);
+      }
+    },
+    [renameYearTarget, refreshYears, refreshMonths, refreshOverview],
+  );
+
+  const onDeleteYearConfirm = useCallback(async () => {
+    const target = deleteYearTarget;
+    if (!target) return;
+    setDeleteYearBusy(true);
+    try {
+      await invoke("delete_year", { yearId: target.id });
+      setDeleteYearTarget(null);
+      const list = await refreshYears();
+      const stillSelected = list.find((y) => y.id === sidebarYearIdRef.current);
+      if (!stillSelected) {
+        if (list.length === 0) {
+          setSidebarYearId(null);
+          sidebarYearIdRef.current = null;
+          setMonths([]);
+          setView({ kind: "welcome" });
+        } else {
+          await enterYear(list[0].id);
+        }
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDeleteYearBusy(false);
+    }
+  }, [deleteYearTarget, refreshYears, enterYear]);
+
+  const openDuplicateYearModal = useCallback(
+    async (yearId?: number) => {
+      const id = yearId ?? sidebarYearIdRef.current;
+      if (id == null) return;
+      const target = yearsRef.current.find((y) => y.id === id) ?? null;
+      if (!target) return;
+      try {
+        const sourceMonths = await invoke<MonthRow[]>("list_months_for_year", {
+          yearId: target.id,
+        });
+        setDuplicateYearMonths(sourceMonths);
+        setDuplicateYearTarget(target);
       } catch (e) {
         setError(String(e));
       }
     },
-    [refreshWorkspaceMeta, refreshSettings],
+    [],
   );
 
-  const onAcknowledgeRename = useCallback(async () => {
-    if (!externalRename) return;
-    const target = externalRename.fileBasename;
-    setExternalRename(null);
-    if (!target) return;
-    try {
-      await invoke<string>("set_workspace_year", { yearLabel: target });
-      await refreshWorkspaceMeta();
-    } catch (e) {
-      setError(String(e));
+  // Year-end nudge: in November/December, if the next calendar year hasn't
+  // been added to this workspace yet, surface a soft banner inviting the
+  // user to roll the current year forward. We pick the best source year
+  // (the existing row matching the current calendar year, falling back to
+  // the most recent numeric year) so the duplicate-year modal opens with a
+  // sensible default rather than asking the user to pick.
+  const yearEndNudge = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth();
+    if (month !== 10 && month !== 11) return null;
+    const currentYearLabel = String(now.getFullYear());
+    const nextYearLabel = String(now.getFullYear() + 1);
+    if (years.some((y) => y.yearLabel === nextYearLabel)) return null;
+    if (years.length === 0) return null;
+    const exact = years.find((y) => y.yearLabel === currentYearLabel);
+    let source = exact ?? null;
+    if (!source) {
+      const numeric = [...years]
+        .map((y) => ({ y, n: Number(y.yearLabel) }))
+        .filter((x) => Number.isFinite(x.n))
+        .sort((a, b) => b.n - a.n)[0];
+      source = numeric?.y ?? null;
     }
-  }, [externalRename, refreshWorkspaceMeta]);
+    if (!source) return null;
+    return {
+      sourceYearId: source.id,
+      sourceLabel: source.yearLabel,
+      nextLabel: nextYearLabel,
+    };
+  }, [years]);
+
+  const onStartYearEndNudge = useCallback(() => {
+    if (!yearEndNudge) return;
+    void openDuplicateYearModal(yearEndNudge.sourceYearId);
+  }, [yearEndNudge, openDuplicateYearModal]);
+
+  const openRenameYearModal = useCallback((yearId?: number) => {
+    const id = yearId ?? sidebarYearIdRef.current;
+    if (id == null) return;
+    const target = yearsRef.current.find((y) => y.id === id) ?? null;
+    if (target) setRenameYearTarget(target);
+  }, []);
+
+  const openDeleteYearModal = useCallback((yearId?: number) => {
+    const id = yearId ?? sidebarYearIdRef.current;
+    if (id == null) return;
+    const target = yearsRef.current.find((y) => y.id === id) ?? null;
+    if (target) setDeleteYearTarget(target);
+  }, []);
+
+  const onDuplicateYearSubmit = useCallback(
+    async (args: DuplicateYearArgs) => {
+      const target = duplicateYearTarget;
+      if (!target) return;
+      setDuplicateYearBusy(true);
+      try {
+        const newId = await invoke<number>("duplicate_year", {
+          sourceYearId: target.id,
+          destYearLabel: args.destYearLabel,
+          mode: args.mode,
+          sourceMonthId: args.sourceMonthId ?? null,
+        });
+        setDuplicateYearTarget(null);
+        await refreshYears();
+        await enterYear(newId);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setDuplicateYearBusy(false);
+      }
+    },
+    [duplicateYearTarget, refreshYears, enterYear],
+  );
 
   const onToggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -2785,16 +4829,31 @@ export default function App() {
     let unlisten: UnlistenFn | undefined;
     const win = getCurrentWindow();
     win
-      .onCloseRequested(async (event) => {
-        try {
-          const isDefault = await invoke<boolean>("is_default_workspace");
-          const dirty = await invoke<boolean>("is_dirty");
-          if (!isDefault || !dirty) return;
-          event.preventDefault();
-          setUnsavedPromptOpen(true);
-        } catch (err) {
-          setError(String(err));
-        }
+      .onCloseRequested((event) => {
+        // We must call preventDefault SYNCHRONOUSLY — once the handler yields
+        // to an `await`, Tauri may have already resolved the close. We block
+        // the default close every time, then either destroy the window
+        // ourselves (clean state) or surface the unsaved-changes prompt.
+        event.preventDefault();
+        void (async () => {
+          try {
+            const isDefault = await invoke<boolean>("is_default_workspace");
+            const dirty = await invoke<boolean>("is_dirty");
+            if (!isDefault || !dirty) {
+              await win.destroy();
+              return;
+            }
+            setUnsavedPromptOpen(true);
+          } catch (err) {
+            setError(String(err));
+            // Don't trap the user inside a window we can't reason about.
+            try {
+              await win.destroy();
+            } catch {
+              /* swallow — window may already be gone */
+            }
+          }
+        })();
       })
       .then((u) => {
         unlisten = u;
@@ -2850,49 +4909,6 @@ export default function App() {
     setReorderModalOpen(true);
   }, []);
 
-  const openCreatePeriodModal = useCallback(() => {
-    const list = monthsRef.current;
-    const sorted = [...list].sort((a, b) => a.periodStart.localeCompare(b.periodStart));
-    const last = sorted[sorted.length - 1];
-    const { periodStart, periodEnd } = last
-      ? nextFullMonthAfterPeriodEnd(last.periodEnd)
-      : fullMonthBoundsFromYearMonth(currentYearMonth());
-    setPeriodModal({
-      intent: "create",
-      title: "Add a budget month",
-      confirmLabel: "Create",
-      initialStart: periodStart,
-      initialEnd: periodEnd,
-    });
-  }, []);
-
-  const openDuplicatePeriodModal = useCallback(() => {
-    const v = viewRef.current;
-    const mv = monthViewRef.current;
-    if (v.kind !== "month" || !mv) return;
-    const { periodStart, periodEnd } = nextFullMonthAfterPeriodEnd(mv.periodEnd);
-    setPeriodModal({
-      intent: "duplicate",
-      title: "Duplicate current month",
-      confirmLabel: "Duplicate",
-      initialStart: periodStart,
-      initialEnd: periodEnd,
-    });
-  }, []);
-
-  const openEditPeriodModal = useCallback((monthId: number) => {
-    const row = monthsRef.current.find((m) => m.id === monthId);
-    if (!row) return;
-    setPeriodModal({
-      intent: "edit",
-      editMonthId: monthId,
-      title: "Edit period dates",
-      confirmLabel: "Save dates",
-      initialStart: row.periodStart,
-      initialEnd: row.periodEnd,
-    });
-  }, []);
-
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     const listenSafe = (name: string, fn: () => void) =>
@@ -2901,19 +4917,75 @@ export default function App() {
     void listenSafe("menu:prev-month", () => cycleMonth(-1));
     void listenSafe("menu:open-file", () => void onOpenFile());
     void listenSafe("menu:new-year", () => onCreateYear());
-    void listenSafe("menu:save", () => void onSave());
     void listenSafe("menu:save-as", () => void onSaveAs());
     void listenSafe("menu:toggle-autosave", () => void onToggleAutoSave());
     void listenSafe("menu:reorganize", () => openReorderModal());
     void listenSafe("menu:show-default-folder", () => void onRevealFolder());
     void listenSafe("menu:export-csv", () => void onExportCsv());
     void listenSafe("menu:export-json", () => void onExportJson());
+    void listenSafe("menu:export-csv-redacted", () => void onExportCsvRedacted());
+    void listenSafe("menu:export-json-redacted", () => void onExportJsonRedacted());
     void listenSafe("menu:toggle-sidebar", () => onToggleSidebar());
     void listenSafe("menu:show-overview", () => void showOverview());
     void listenSafe("menu:show-reports", () => void showReports());
     void listenSafe("menu:show-library", () => void showLibrary());
-    void listenSafe("menu:add-month", () => openCreatePeriodModal());
-    void listenSafe("menu:duplicate-month", () => openDuplicatePeriodModal());
+    void listenSafe("menu:duplicate-year", () => void openDuplicateYearModal());
+    void listenSafe("menu:rename-year", () => openRenameYearModal());
+    void listenSafe("menu:delete-year", () => openDeleteYearModal());
+    void listenSafe("menu:open-preferences", () => setPrefsOpen(true));
+    void listenSafe("menu:set-password", () => {
+      if (!encryptionAvailableRef.current) {
+        setError(
+          "This build of mimo doesn't include encryption support. Rebuild with --features encryption.",
+        );
+        return;
+      }
+      if (workspaceEncryptedRef.current) {
+        setError(
+          "This workspace is already encrypted. Use Change Password to update it.",
+        );
+        return;
+      }
+      setPasswordError(null);
+      setPasswordModal("set");
+    });
+    void listenSafe("menu:change-password", () => {
+      if (!encryptionAvailableRef.current) {
+        setError("This build of mimo doesn't include encryption support.");
+        return;
+      }
+      if (!workspaceEncryptedRef.current) {
+        setError(
+          "This workspace isn't encrypted yet. Use Set Password to add a password.",
+        );
+        return;
+      }
+      setPasswordError(null);
+      setPasswordModal("change");
+    });
+    void listenSafe("menu:remove-password", () => {
+      if (!encryptionAvailableRef.current || !workspaceEncryptedRef.current) {
+        setError(
+          encryptionAvailableRef.current
+            ? "This workspace isn't encrypted."
+            : "This build of mimo doesn't include encryption support.",
+        );
+        return;
+      }
+      const ok = window.confirm(
+        "Remove encryption from this workspace? The file will be readable without a password after this.",
+      );
+      if (!ok) return;
+      void (async () => {
+        try {
+          await invoke("decrypt_workspace");
+          setWorkspaceEncrypted(false);
+          showSaveToast("Encryption removed");
+        } catch (e) {
+          setError(String(e));
+        }
+      })();
+    });
     return () => {
       unlisteners.forEach((u) => u());
     };
@@ -2922,7 +4994,6 @@ export default function App() {
     cycleMonth,
     onOpenFile,
     onCreateYear,
-    onSave,
     onSaveAs,
     onToggleAutoSave,
     openReorderModal,
@@ -2931,18 +5002,67 @@ export default function App() {
     showOverview,
     showReports,
     showLibrary,
-    openCreatePeriodModal,
-    openDuplicatePeriodModal,
+    openDuplicateYearModal,
   ]);
+
+  // Window-level Cmd+S handler (the menu Save item was removed in favor of a status pill).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      if (e.key.toLowerCase() === "s" && !e.shiftKey) {
+        e.preventDefault();
+        void onCmdS();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCmdS]);
 
   useEffect(() => {
     if (!autoSaveOn) return;
     const intervalMs = 5 * 60 * 1000;
     const id = window.setInterval(() => {
-      void invoke("save_snapshot").catch(() => {});
+      setSnapshotState((s) => ({ ...s, busy: true }));
+      void invoke("save_snapshot")
+        .then(() => {
+          setSnapshotState({ busy: false, lastAt: Date.now() });
+        })
+        .catch(() => {
+          setSnapshotState((s) => ({ ...s, busy: false }));
+        });
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [autoSaveOn]);
+
+  // Lightweight dirty poller for the status pill.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const d = await invoke<boolean>("is_dirty");
+        if (!cancelled) setDirty(d);
+      } catch {
+        // ignore — pill just shows last known state
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => {
+      void tick();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [dbPath]);
+
+  // "Last saved" pill ticks every 30s so "2m ago" stays current.
+  const [pillTick, setPillTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setPillTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  void pillTick;
 
   const activeMonthId = useCallback((): number | null => {
     const v = viewRef.current;
@@ -2971,142 +5091,308 @@ export default function App() {
   );
 
   const onAddRow = useCallback(
-    async (bucketId: number) => {
-      const monthId = activeMonthId();
-      if (monthId == null) return;
-      const name = window.prompt("New budget row name:");
-      if (name == null) return;
-      const trimmed = name.trim();
-      if (!trimmed) return;
-      try {
-        await invoke("add_expense_line", { bucketId, name: trimmed });
-        await refreshMonthView(monthId);
-      } catch (e) {
-        setError(String(e));
-      }
+    (bucketId: number) => {
+      const mv = monthViewRef.current;
+      const bucket = mv?.expenseBuckets.find((b) => b.id === bucketId);
+      setLineEditConfig({
+        mode: "add",
+        bucketId,
+        bucketName: bucket?.name ?? "this bucket",
+      });
     },
-    [refreshMonthView, activeMonthId],
+    [],
   );
 
-  const onRenameRow = useCallback(
-    async (lineId: number, currentName: string) => {
-      const monthId = activeMonthId();
-      if (monthId == null) return;
-      const name = window.prompt("Rename row:", currentName);
-      if (name == null) return;
-      const trimmed = name.trim();
-      if (!trimmed || trimmed === currentName) return;
-      try {
-        await invoke("rename_expense_line", { id: lineId, name: trimmed });
-        await refreshMonthView(monthId);
-      } catch (e) {
-        setError(String(e));
+  const onEditRow = useCallback(
+    (lineId: number) => {
+      const mv = monthViewRef.current;
+      if (!mv) return;
+      let foundLine: ExpenseLineDto | undefined;
+      let foundBucket: string | undefined;
+      for (const b of mv.expenseBuckets) {
+        const l = b.lines.find((x) => x.id === lineId);
+        if (l) {
+          foundLine = l;
+          foundBucket = b.name;
+          break;
+        }
       }
+      if (!foundLine) return;
+      setLineEditConfig({
+        mode: "edit",
+        lineId,
+        bucketName: foundBucket,
+        initialName: foundLine.name,
+        initialNeutral: foundLine.isNeutralTransfer,
+        initialSinking: foundLine.isSinkingFund,
+      });
     },
-    [refreshMonthView, activeMonthId],
+    [],
   );
 
-  const onDeleteRow = useCallback(
-    async (lineId: number, currentName: string) => {
+  const onDeleteRow = useCallback((lineId: number, currentName: string) => {
+    setPendingDelete({ lineId, name: currentName });
+  }, []);
+
+  const submitLineEdit = useCallback(
+    async (payload: {
+      name: string;
+      isNeutralTransfer: boolean;
+      isSinkingFund: boolean;
+    }) => {
+      const cfg = lineEditConfig;
+      if (!cfg) return;
       const monthId = activeMonthId();
       if (monthId == null) return;
-      const ok = window.confirm(`Delete row "${currentName}" and all its transactions?`);
-      if (!ok) return;
       try {
-        await invoke("delete_expense_line", { id: lineId });
-        await refreshMonthView(monthId);
-      } catch (e) {
-        setError(String(e));
-      }
-    },
-    [refreshMonthView, activeMonthId],
-  );
-
-  const confirmPeriodModal = useCallback(
-    async (start: string, end: string) => {
-      if (!periodModal) return;
-      const cfg = periodModal;
-      setPeriodModal(null);
-      setBusy(true);
-      setError(null);
-      try {
-        if (cfg.intent === "create") {
-          const newId = await invoke<number>("create_period", {
-            periodStart: start,
-            periodEnd: end,
+        if (cfg.mode === "add") {
+          await invoke("add_expense_line", {
+            bucketId: cfg.bucketId,
+            name: payload.name,
+            isNeutralTransfer: payload.isNeutralTransfer,
+            isSinkingFund: payload.isSinkingFund,
           });
-          await refreshMonths();
-          flushSync(() => {
-            setView({ kind: "month", monthId: newId });
-          });
-          await refreshMonthView(newId);
-        } else if (cfg.intent === "duplicate") {
-          const fromId = activeMonthId();
-          if (fromId == null) return;
-          const newId = await invoke<number>("duplicate_period", {
-            fromMonthId: fromId,
-            periodStart: start,
-            periodEnd: end,
-          });
-          await refreshMonths();
-          flushSync(() => {
-            setView({ kind: "month", monthId: newId });
-          });
-          await refreshMonthView(newId);
-        } else if (cfg.editMonthId != null) {
-          await invoke("update_period_range", {
-            monthId: cfg.editMonthId,
-            periodStart: start,
-            periodEnd: end,
-          });
-          await refreshMonths();
-          const mid = activeMonthId();
-          if (mid === cfg.editMonthId) {
-            await refreshMonthView(cfg.editMonthId);
+        } else {
+          if (payload.name !== cfg.initialName) {
+            await invoke("rename_expense_line", {
+              id: cfg.lineId,
+              name: payload.name,
+            });
+          }
+          if (
+            payload.isNeutralTransfer !== cfg.initialNeutral ||
+            payload.isSinkingFund !== cfg.initialSinking
+          ) {
+            await invoke("update_expense_line_flags", {
+              lineId: cfg.lineId,
+              isNeutralTransfer: payload.isNeutralTransfer,
+              isSinkingFund: payload.isSinkingFund,
+            });
           }
         }
+        setLineEditConfig(null);
+        await refreshMonthView(monthId);
       } catch (e) {
         setError(String(e));
-      } finally {
-        setBusy(false);
       }
     },
-    [periodModal, refreshMonths, refreshMonthView, activeMonthId],
+    [lineEditConfig, refreshMonthView, activeMonthId],
   );
 
-  const onExportCsv = useCallback(async () => {
+  const confirmDelete = useCallback(async () => {
+    const target = pendingDelete;
+    if (!target) return;
+    const monthId = activeMonthId();
+    if (monthId == null) return;
+    setDeleteBusy(true);
     try {
-      const csv = await invoke<string>("export_csv_data");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const label =
-        (workspaceMeta?.yearLabel?.trim() || "budget").replace(/\s+/g, "_");
-      a.download = `${label}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await invoke("delete_expense_line", { id: target.lineId });
+      setPendingDelete(null);
+      await refreshMonthView(monthId);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setDeleteBusy(false);
     }
-  }, [workspaceMeta]);
+  }, [pendingDelete, refreshMonthView, activeMonthId]);
 
-  const onExportJson = useCallback(async () => {
-    try {
-      const json = await invoke<string>("export_workspace_json");
-      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  // Common downloader used by every export flow. Centralising the Blob/URL
+  // dance avoids subtle leaks (forgetting revokeObjectURL) and makes the
+  // call sites read like declarative recipes — name in, file out.
+  const downloadFile = useCallback(
+    (content: string, filename: string, mime: string) => {
+      const blob = new Blob([content], { type: mime });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const label =
-        (workspaceMeta?.yearLabel?.trim() || "budget").replace(/\s+/g, "_");
-      a.download = `${label}.json`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [workspaceMeta]);
+    },
+    [],
+  );
+
+  const workspaceFilenameStem = useCallback(
+    () => (basenameNoExt(dbPath) || "budget").replace(/\s+/g, "_"),
+    [dbPath],
+  );
+
+  const monthFilenameStem = useCallback(
+    (monthId: number): string => {
+      const wsLabel = workspaceFilenameStem();
+      const m = months.find((row) => row.id === monthId);
+      const monthSlug =
+        (m?.yearMonth || m?.tabLabel || `month-${monthId}`).replace(/\s+/g, "_");
+      return `${wsLabel}-${monthSlug}`;
+    },
+    [workspaceFilenameStem, months],
+  );
+
+  const runExport = useCallback(
+    async (
+      command: string,
+      args: Record<string, unknown> | undefined,
+      filename: string,
+      mime: string,
+    ) => {
+      try {
+        const out = await invoke<string>(command, args);
+        downloadFile(out, filename, mime);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [downloadFile],
+  );
+
+  const onExportCsv = useCallback(
+    () =>
+      runExport(
+        "export_csv_data",
+        undefined,
+        `${workspaceFilenameStem()}.csv`,
+        "text/csv;charset=utf-8",
+      ),
+    [runExport, workspaceFilenameStem],
+  );
+
+  const onExportJson = useCallback(
+    () =>
+      runExport(
+        "export_workspace_json",
+        undefined,
+        `${workspaceFilenameStem()}.json`,
+        "application/json;charset=utf-8",
+      ),
+    [runExport, workspaceFilenameStem],
+  );
+
+  // Redacted variants share the file naming scheme but get a `-redacted`
+  // suffix so a sender can tell at a glance which version they attached.
+  const onExportCsvRedacted = useCallback(
+    () =>
+      runExport(
+        "export_workspace_csv_redacted",
+        undefined,
+        `${workspaceFilenameStem()}-redacted.csv`,
+        "text/csv;charset=utf-8",
+      ),
+    [runExport, workspaceFilenameStem],
+  );
+
+  const onExportJsonRedacted = useCallback(
+    () =>
+      runExport(
+        "export_workspace_json_redacted",
+        undefined,
+        `${workspaceFilenameStem()}-redacted.json`,
+        "application/json;charset=utf-8",
+      ),
+    [runExport, workspaceFilenameStem],
+  );
+
+  const onExportYearCsvRedacted = useCallback(
+    (yearId: number, yearLabel: string) =>
+      runExport(
+        "export_year_csv_redacted",
+        { yearId },
+        `${workspaceFilenameStem()}-${yearLabel || "year"}-redacted.csv`,
+        "text/csv;charset=utf-8",
+      ),
+    [runExport, workspaceFilenameStem],
+  );
+
+  const onExportYearJsonRedacted = useCallback(
+    (yearId: number, yearLabel: string) =>
+      runExport(
+        "export_year_json_redacted",
+        { yearId },
+        `${workspaceFilenameStem()}-${yearLabel || "year"}-redacted.json`,
+        "application/json;charset=utf-8",
+      ),
+    [runExport, workspaceFilenameStem],
+  );
+
+  const onExportYearCsv = useCallback(
+    async (yearId: number, yearLabel: string) => {
+      // No backend "year detailed" export today, so fall back to the
+      // workspace-wide detailed CSV with a year-tagged filename. This keeps
+      // the picker UX consistent without requiring a new backend command yet.
+      try {
+        const csv = await invoke<string>("export_csv_data");
+        downloadFile(
+          csv,
+          `${workspaceFilenameStem()}-${yearLabel || "year"}.csv`,
+          "text/csv;charset=utf-8",
+        );
+        void yearId;
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [downloadFile, workspaceFilenameStem],
+  );
+
+  const onExportYearJson = useCallback(
+    async (yearId: number, yearLabel: string) => {
+      try {
+        const json = await invoke<string>("export_workspace_json");
+        downloadFile(
+          json,
+          `${workspaceFilenameStem()}-${yearLabel || "year"}.json`,
+          "application/json;charset=utf-8",
+        );
+        void yearId;
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [downloadFile, workspaceFilenameStem],
+  );
+
+  const onExportMonthCsv = useCallback(
+    (monthId: number) =>
+      runExport(
+        "export_month_csv",
+        { monthId },
+        `${monthFilenameStem(monthId)}.csv`,
+        "text/csv;charset=utf-8",
+      ),
+    [runExport, monthFilenameStem],
+  );
+
+  const onExportMonthJson = useCallback(
+    (monthId: number) =>
+      runExport(
+        "export_month_json",
+        { monthId },
+        `${monthFilenameStem(monthId)}.json`,
+        "application/json;charset=utf-8",
+      ),
+    [runExport, monthFilenameStem],
+  );
+
+  const onExportMonthCsvRedacted = useCallback(
+    (monthId: number) =>
+      runExport(
+        "export_month_csv_redacted",
+        { monthId },
+        `${monthFilenameStem(monthId)}-redacted.csv`,
+        "text/csv;charset=utf-8",
+      ),
+    [runExport, monthFilenameStem],
+  );
+
+  const onExportMonthJsonRedacted = useCallback(
+    (monthId: number) =>
+      runExport(
+        "export_month_json_redacted",
+        { monthId },
+        `${monthFilenameStem(monthId)}-redacted.json`,
+        "application/json;charset=utf-8",
+      ),
+    [runExport, monthFilenameStem],
+  );
 
   if (loading) {
     return (
@@ -3116,18 +5402,49 @@ export default function App() {
     );
   }
 
+  const fileBasename = basenameNoExt(dbPath) || "budget";
+  // Prefer the user-set display name from workspace_meta over the raw file
+  // basename. This lets the user give a workspace a friendlier label (e.g.
+  // "Family budget") without renaming the underlying file. If display_name is
+  // unset OR we're on the default scratch workspace, fall back to the
+  // basename so the UI stays accurate.
+  const displayNameOverride =
+    !isDefaultWorkspace && workspaceMeta?.displayName
+      ? workspaceMeta.displayName
+      : null;
+  const workspaceBasename = displayNameOverride ?? fileBasename;
+  const yearLabels = years.map((y) => y.yearLabel);
+
   return (
     <div className={`app-layout${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-      <PeriodRangeModal
-        config={periodModal}
-        onClose={() => setPeriodModal(null)}
-        onConfirm={(s, e) => void confirmPeriodModal(s, e)}
-      />
       <BucketReorderModal
         open={reorderModalOpen}
         buckets={monthView?.expenseBuckets ?? []}
         onClose={() => setReorderModalOpen(false)}
         onCommit={(ids) => void reorderBuckets(ids)}
+      />
+      <PreferencesModal
+        open={prefsOpen}
+        settings={settings}
+        workspaceMeta={workspaceMeta}
+        workspaceFileBasename={fileBasename}
+        isDefaultWorkspace={isDefaultWorkspace}
+        onClose={() => setPrefsOpen(false)}
+        onSaved={() => void refreshSettings()}
+        onWorkspaceMetaSaved={() => void refreshWorkspaceMeta()}
+        onError={(msg) => setError(msg)}
+      />
+      <PasswordModal
+        kind={passwordModal ?? "unlock"}
+        open={passwordModal !== null}
+        busy={passwordBusy}
+        error={passwordError}
+        onCancel={() => {
+          if (passwordBusy) return;
+          setPasswordModal(null);
+          setPasswordError(null);
+        }}
+        onSubmit={(pw) => void onPasswordSubmit(pw)}
       />
       <UnsavedChangesModal
         open={unsavedPromptOpen}
@@ -3136,54 +5453,95 @@ export default function App() {
         onDiscard={() => void onUnsavedDiscard()}
         onCancel={onUnsavedCancel}
       />
-      <NewYearModal
-        open={newYearOpen}
+      <CreateYearModal
+        open={createYearOpen}
         defaultYear={new Date().getFullYear()}
-        onCancel={() => setNewYearOpen(false)}
-        onCreate={(label, scaffold) => void onCreateYearSubmit(label, scaffold)}
+        busy={createYearBusy}
+        existingLabels={yearLabels}
+        onCancel={() => {
+          if (!createYearBusy) setCreateYearOpen(false);
+        }}
+        onCreate={(label) => void onCreateYearSubmit(label)}
       />
-      <ExternalRenameModal
-        info={externalRename}
-        onAcknowledge={() => void onAcknowledgeRename()}
+      <RenameYearModal
+        open={renameYearTarget !== null}
+        initial={renameYearTarget?.yearLabel ?? ""}
+        busy={renameYearBusy}
+        existingLabels={yearLabels}
+        onCancel={() => {
+          if (!renameYearBusy) setRenameYearTarget(null);
+        }}
+        onSubmit={(label) => void onRenameYearSubmit(label)}
+      />
+      <DeleteYearConfirmModal
+        open={deleteYearTarget !== null}
+        yearLabel={deleteYearTarget?.yearLabel ?? ""}
+        busy={deleteYearBusy}
+        onCancel={() => {
+          if (!deleteYearBusy) setDeleteYearTarget(null);
+        }}
+        onConfirm={() => void onDeleteYearConfirm()}
+      />
+      <DuplicateYearModal
+        open={duplicateYearTarget !== null}
+        sourceYear={duplicateYearTarget}
+        sourceMonths={duplicateYearMonths}
+        busy={duplicateYearBusy}
+        existingLabels={yearLabels}
+        onCancel={() => {
+          if (!duplicateYearBusy) setDuplicateYearTarget(null);
+        }}
+        onSubmit={(args) => void onDuplicateYearSubmit(args)}
+      />
+      <ExpenseLineEditModal
+        config={lineEditConfig}
+        onCancel={() => setLineEditConfig(null)}
+        onSubmit={submitLineEdit}
+      />
+      <ConfirmDeleteRowModal
+        open={pendingDelete !== null}
+        rowName={pendingDelete?.name ?? ""}
+        busy={deleteBusy}
+        onCancel={() => {
+          if (!deleteBusy) setPendingDelete(null);
+        }}
+        onConfirm={() => void confirmDelete()}
       />
 
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggleCollapsed={onToggleSidebar}
-        view={view}
-        workspaceMeta={workspaceMeta}
+        workspaceTitle={isDefaultWorkspace ? "Untitled workspace" : workspaceBasename}
+        workspaceTitleIsPlaceholder={isDefaultWorkspace}
+        workspacePathTooltip={(() => {
+          const parts: string[] = [];
+          if (workspaceMeta?.updatedAt) {
+            parts.push(`Last edited ${formatRelative(workspaceMeta.updatedAt)}`);
+          }
+          if (dbPath) parts.push(dbPath);
+          const joined = parts.join("\n");
+          return joined.length > 0 ? joined : undefined;
+        })()}
+        years={years}
         months={months}
-        isDefaultWorkspace={isDefaultWorkspace}
-        hasWorkspace={!isDefaultWorkspace || !!workspaceMeta?.yearLabel?.trim() || months.length > 0}
-        onShowOverview={() => void showOverview()}
-        onShowReports={() => void showReports()}
-        onShowLibrary={() => void showLibrary()}
+        view={view}
+        sidebarYearId={sidebarYearId}
+        onSelectYear={(id) => void enterYear(id)}
+        onBackToYears={exitYear}
+        onShowYearOverview={(id) => {
+          void enterYear(id);
+        }}
+        onShowCrossYear={() => void showCrossYear()}
         onActivateMonth={(id) => void activateMonth(id)}
-        onAddMonth={openCreatePeriodModal}
-        onDuplicateCurrentMonth={openDuplicatePeriodModal}
-        onEditPeriod={openEditPeriodModal}
-        onRenameYear={onRenameYear}
+        onCreateYear={onCreateYear}
       />
 
       <div className="app-main">
         <header className="top-bar">
-          <button
-            type="button"
-            className="btn ghost sidebar-toggle-btn"
-            onClick={onToggleSidebar}
-            title="Toggle sidebar (⌘\\)"
-            aria-label="Toggle sidebar"
-          >
-            <ChevronIcon open={!sidebarCollapsed} />
-          </button>
-          <div className="brand">
-            <span className="brand-mark">◆</span>
-            <span>Budget</span>
-            {workspaceMeta?.yearLabel && (
-              <span className="brand-year" title="Current year workspace">
-                {workspaceMeta.yearLabel}
-              </span>
-            )}
+          <div className="brand" title={dbPath || undefined}>
+            <span className="brand-mark" aria-hidden="true">◆</span>
+            <span className="brand-name">mimo</span>
+            <span className="brand-tagline">Money In, Money Out — Mind the Flow</span>
           </div>
           <div className="top-bar-spacer" />
           <button
@@ -3210,47 +5568,19 @@ export default function App() {
           >
             Library
           </button>
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void onOpenFile()}
-            title="Open a saved budget file (⌘O)"
-          >
-            Open…
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => void onSave()}
-            title="Save changes (⌘S)"
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => void onSaveAs()}
-            title="Save as… (⇧⌘S)"
-          >
-            Save as…
-          </button>
-          {savedFlash && (
+          <SaveStatusPill
+            isDefaultWorkspace={isDefaultWorkspace}
+            dirty={dirty}
+            autoSaveOn={autoSaveOn}
+            snapshotBusy={snapshotState.busy}
+            lastSnapshotAt={snapshotState.lastAt}
+            onSaveAs={() => void onSaveAs()}
+          />
+          {saveToast && (
             <span className="saved-flash" role="status" aria-live="polite">
-              Saved
+              {saveToast}
             </span>
           )}
-          <label
-            className="field-inline auto-save-toggle"
-            title="Saves a snapshot every 5 minutes"
-          >
-            <input
-              type="checkbox"
-              checked={autoSaveOn}
-              onChange={() => void onToggleAutoSave()}
-              aria-label="Toggle auto-save"
-            />
-            <span className="label">Auto-save</span>
-          </label>
         </header>
 
         {error && (
@@ -3287,31 +5617,94 @@ export default function App() {
             />
           )}
 
-          {view.kind === "overview" && yearOverview && (
+          {view.kind === "overview" && sidebarYearId == null && years.length > 0 && (
+            <YearsLanding
+              years={years}
+              onSelectYear={(id) => void enterYear(id)}
+              onCreateYear={onCreateYear}
+              workspaceName={workspaceBasename}
+              yearEndNudge={
+                yearEndNudge
+                  ? {
+                      sourceLabel: yearEndNudge.sourceLabel,
+                      nextLabel: yearEndNudge.nextLabel,
+                    }
+                  : null
+              }
+              onStartYearEndNudge={onStartYearEndNudge}
+            />
+          )}
+
+          {view.kind === "overview" && yearOverview && sidebarYearId != null && (
             <>
               <div className="overview-toolbar">
-                <button type="button" className="btn ghost" onClick={() => void onExportCsv()}>
-                  Export CSV
-                </button>
-                <button type="button" className="btn ghost" onClick={() => void onExportJson()}>
-                  Export JSON
-                </button>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={openCreatePeriodModal}
-                >
-                  <PlusIcon /> Add month
-                </button>
+                <ExportPickerButton
+                  label="Export CSV"
+                  formatLabel="CSV"
+                  onDetailed={() =>
+                    void onExportYearCsv(sidebarYearId, yearOverview.yearLabel)
+                  }
+                  onRedacted={() =>
+                    void onExportYearCsvRedacted(
+                      sidebarYearId,
+                      yearOverview.yearLabel,
+                    )
+                  }
+                />
+                <ExportPickerButton
+                  label="Export JSON"
+                  formatLabel="JSON"
+                  onDetailed={() =>
+                    void onExportYearJson(sidebarYearId, yearOverview.yearLabel)
+                  }
+                  onRedacted={() =>
+                    void onExportYearJsonRedacted(
+                      sidebarYearId,
+                      yearOverview.yearLabel,
+                    )
+                  }
+                />
+                {sidebarYearId != null && (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => void openDuplicateYearModal()}
+                    title="Duplicate this year (custom destination)"
+                  >
+                    Duplicate year…
+                  </button>
+                )}
               </div>
               <YearOverviewView
                 overview={yearOverview}
                 onActivateMonth={(id) => void activateMonth(id)}
+                yearEndNudge={
+                  yearEndNudge
+                    ? {
+                        sourceLabel: yearEndNudge.sourceLabel,
+                        nextLabel: yearEndNudge.nextLabel,
+                      }
+                    : null
+                }
+                onStartYearEndNudge={onStartYearEndNudge}
               />
             </>
           )}
 
-          {view.kind === "overview" && !yearOverview && (
+          {view.kind === "overview" && !yearOverview && sidebarYearId == null && years.length === 0 && (
+            <WelcomeScreen
+              recentFiles={recentFiles}
+              busy={busy}
+              onCreateYear={onCreateYear}
+              onOpenFile={() => void onOpenFile()}
+              onOpenRecent={(p) => void onOpenRecent(p)}
+              onShowLibrary={() => void showLibrary()}
+              defaultFolder={settings?.defaultFolder ?? null}
+              onRevealFolder={() => void onRevealFolder()}
+            />
+          )}
+
+          {view.kind === "overview" && !yearOverview && sidebarYearId != null && (
             <p className="muted month-loading-banner">Loading overview…</p>
           )}
 
@@ -3320,6 +5713,14 @@ export default function App() {
               initial={reportsInitial}
               onInitialApplied={onReportsInitialApplied}
               monthRows={months}
+            />
+          )}
+
+          {view.kind === "cross-year" && (
+            <CrossYearView
+              data={crossYear}
+              loading={crossYearLoading}
+              onJumpToYear={(id) => void enterYear(id)}
             />
           )}
 
@@ -3334,12 +5735,20 @@ export default function App() {
                 if (view.kind === "month") void refreshMonthView(view.monthId);
               }}
               onAddRow={onAddRow}
-              onRenameRow={onRenameRow}
+              onEditRow={onEditRow}
               onDeleteRow={onDeleteRow}
               onOpenReorder={openReorderModal}
               onOpenLineYtd={(args) => {
                 setYtdDrawer(args);
               }}
+              onExportCsv={() => void onExportMonthCsv(monthView.monthId)}
+              onExportJson={() => void onExportMonthJson(monthView.monthId)}
+              onExportCsvRedacted={() =>
+                void onExportMonthCsvRedacted(monthView.monthId)
+              }
+              onExportJsonRedacted={() =>
+                void onExportMonthJsonRedacted(monthView.monthId)
+              }
             />
           )}
 
@@ -3347,10 +5756,6 @@ export default function App() {
             <p className="muted month-loading-banner">Loading month…</p>
           )}
         </main>
-
-        <footer className="footer muted">
-          <span>Data file: {dbPath || "—"}</span>
-        </footer>
       </div>
 
       <YtdSlideOver
@@ -3433,14 +5838,26 @@ function IncomeLineBlock({
   onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
+  const [rollover, setRollover] = useState(centsToInputString(line.rolloverInCents));
   useEffect(() => {
     setPlanned(centsToInputString(line.plannedCents));
   }, [line.plannedCents]);
+  useEffect(() => {
+    setRollover(centsToInputString(line.rolloverInCents));
+  }, [line.rolloverInCents]);
 
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
     if (c === null) return;
     await invoke("set_income_line_planned", { id: line.id, plannedCents: c });
+    await onRefresh();
+  };
+
+  const saveRollover = async () => {
+    const c = parseMoneyToCents(rollover);
+    if (c === null) return;
+    if (c === line.rolloverInCents) return;
+    await invoke("set_income_line_rollover_in", { lineId: line.id, cents: c });
     await onRefresh();
   };
 
@@ -3453,6 +5870,13 @@ function IncomeLineBlock({
             value={planned}
             onChange={setPlanned}
             onBlur={() => void savePlanned()}
+          />
+        </td>
+        <td className="num">
+          <PlannedAmountInput
+            value={rollover}
+            onChange={setRollover}
+            onBlur={() => void saveRollover()}
           />
         </td>
         <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
@@ -3479,7 +5903,7 @@ function IncomeLineBlock({
       </tr>
       {expanded && (
         <tr className="detail-row">
-          <td colSpan={5}>
+          <td colSpan={6}>
             <IncomeEntriesPanel lineId={line.id} entries={line.entries} onDone={onRefresh} />
           </td>
         </tr>
@@ -3563,7 +5987,7 @@ function ExpenseLineBlock({
   expanded,
   onToggle,
   onRefresh,
-  onRename,
+  onEdit,
   onDelete,
   onOpenYtd,
 }: {
@@ -3571,19 +5995,31 @@ function ExpenseLineBlock({
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
-  onRename?: () => void;
+  onEdit?: () => void;
   onDelete?: () => void;
   onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
+  const [rollover, setRollover] = useState(centsToInputString(line.rolloverInCents));
   useEffect(() => {
     setPlanned(centsToInputString(line.plannedCents));
   }, [line.plannedCents]);
+  useEffect(() => {
+    setRollover(centsToInputString(line.rolloverInCents));
+  }, [line.rolloverInCents]);
 
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
     if (c === null) return;
     await invoke("set_expense_line_planned", { id: line.id, plannedCents: c });
+    await onRefresh();
+  };
+
+  const saveRollover = async () => {
+    const c = parseMoneyToCents(rollover);
+    if (c === null) return;
+    if (c === line.rolloverInCents) return;
+    await invoke("set_expense_line_rollover_in", { lineId: line.id, cents: c });
     await onRefresh();
   };
 
@@ -3613,7 +6049,13 @@ function ExpenseLineBlock({
             onBlur={() => void savePlanned()}
           />
         </td>
-        <td className="num">{formatUsd(line.rolloverInCents, "rounded")}</td>
+        <td className="num">
+          <PlannedAmountInput
+            value={rollover}
+            onChange={setRollover}
+            onBlur={() => void saveRollover()}
+          />
+        </td>
         <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
         <td className={`num ${varianceClassExpense(line.varianceCents)}`}>
           {formatUsd(line.varianceCents, "rounded")}
@@ -3633,8 +6075,11 @@ function ExpenseLineBlock({
             >
               <ListIcon />
             </IconButton>
-            {onRename && (
-              <IconButton label="Rename row" onClick={onRename}>
+            {onEdit && (
+              <IconButton
+                label="Edit row (name, neutral, sinking)"
+                onClick={onEdit}
+              >
                 <PencilIcon />
               </IconButton>
             )}
