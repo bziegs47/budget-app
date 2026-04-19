@@ -54,6 +54,11 @@
         width: min(320px, 80vw);
         height: auto;
       }
+      .wordmark img {
+        display: block;
+        width: min(380px, 92vw);
+        height: auto;
+      }
       p.hint {
         max-width: 36rem;
         margin: 0;
@@ -120,6 +125,27 @@
         </svg>
       </div>
       <p class="hint">Dark UI: brighter gradients for contrast on charcoal.</p>
+    </div>
+
+    <div class="panel light">
+      <h2>Wordmark — light</h2>
+      <div class="frame wordmark">
+        <img src="../public/logo-wordmark.svg" width="360" height="96" alt="mimo wordmark" />
+      </div>
+      <p class="hint">
+        Text logo (lowercase, moderate weight, open tracking). File:
+        <code>public/logo-wordmark.svg</code>. Uses system UI fonts for a calm, familiar read.
+      </p>
+    </div>
+    <div class="panel dark">
+      <h2>Wordmark — dark UI</h2>
+      <div class="frame wordmark">
+        <img src="../public/logo-wordmark-on-dark.svg" width="360" height="96" alt="mimo wordmark" />
+      </div>
+      <p class="hint">
+        Lighter gradient for dark surfaces:
+        <code>public/logo-wordmark-on-dark.svg</code>.
+      </p>
     </div>
   </body>
 </html>
