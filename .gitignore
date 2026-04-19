@@ -28,6 +28,5 @@ src-tauri/target
 
 # User budget data — keep private
 *.mimo
-*.budget
 Test Budget Files/
 

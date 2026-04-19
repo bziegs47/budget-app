@@ -2,9 +2,9 @@
 //!
 //! - `settings.json` holds user preferences: default folder, sidebar state, and
 //!   the recent-files list.
-//! - `library-index.json` holds a cached snapshot of every `.budget` discovered
-//!   under the default folder so the Library view is instant (and so encrypted
-//!   workspaces - Phase 3 - can show their last-known summary while locked).
+//! - `library-index.json` holds a cached snapshot of every `.mimo` workspace
+//!   discovered under the default folder so the Library view is instant (and
+//!   so encrypted workspaces can show their last-known summary while locked).
 
 use crate::db;
 use crate::models::{AppSettings, CloudFolderProbe, LibraryEntry, RecentFile};
@@ -103,9 +103,28 @@ pub fn upsert_recent(
     save_settings(app, &settings)
 }
 
+/// Returns the recent-files list with any entries whose underlying file is
+/// missing pruned out (and persisted back). This keeps the welcome screen
+/// honest when workspaces get renamed or deleted outside the app, or via
+/// the library's own rename/delete actions before the cache caught up.
 pub fn list_recent(app: &tauri::AppHandle) -> Result<Vec<RecentFile>, String> {
-    let settings = load_settings(app)?;
+    let mut settings = load_settings(app)?;
+    if prune_missing_recents(&mut settings) {
+        save_settings(app, &settings)?;
+    }
     Ok(settings.recent_files)
+}
+
+/// Drops `recent_files` entries whose path no longer points at a file on
+/// disk. Returns `true` if anything was removed so the caller can decide
+/// whether to persist. Shared by `get_settings` and `list_recent` so the
+/// welcome screen and the lower-level recents API stay in sync.
+pub fn prune_missing_recents(settings: &mut AppSettings) -> bool {
+    let before = settings.recent_files.len();
+    settings
+        .recent_files
+        .retain(|r| Path::new(&r.path).is_file());
+    settings.recent_files.len() != before
 }
 
 pub fn set_sidebar_collapsed(app: &tauri::AppHandle, collapsed: bool) -> Result<(), String> {
@@ -141,7 +160,7 @@ pub fn save_library_index(
     write_atomic(&path, raw.as_bytes())
 }
 
-/// Probe a single `.budget` file and return its index entry. Opens the SQLite
+/// Probe a single `.mimo` file and return its index entry. Opens the SQLite
 /// database read-only briefly to read the workspace meta and per-line totals.
 pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
     let canonical = canonicalize_or_self(path);
@@ -190,6 +209,20 @@ pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
         .query_row("SELECT COUNT(*) FROM budget_months", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
+    // Multi-year files are now the norm, so the tile needs to know
+    // every year in the budget — not just the legacy single
+    // `year_label`. We sort descending so the most recent year leads.
+    let mut year_labels_stmt = conn
+        .prepare("SELECT year_label FROM years ORDER BY sort_order DESC, year_label DESC")
+        .map_err(|e| e.to_string())?;
+    let year_labels: Vec<String> = year_labels_stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(year_labels_stmt);
+    let year_count = year_labels.len() as i64;
+
     Ok(LibraryEntry {
         path: canonical.to_string_lossy().into_owned(),
         year_label,
@@ -201,6 +234,8 @@ pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
         expense_net_actual_cents: expense_net_actual,
         net_actual_cents: income_actual - expense_net_actual,
         month_count,
+        year_labels,
+        year_count,
         encrypted: false,
         provider: detect_provider(&canonical),
         is_conflict_copy: is_conflict_copy_path(&canonical),
@@ -333,7 +368,7 @@ fn count_workspaces_shallow(folder: &Path) -> i64 {
     if let Ok(read) = fs::read_dir(folder) {
         for dirent in read.flatten() {
             let p = dirent.path();
-            if p.is_file() && matches_budget_extension(&p) {
+            if p.is_file() && matches_workspace_extension(&p) {
                 n += 1;
             }
         }
@@ -341,7 +376,7 @@ fn count_workspaces_shallow(folder: &Path) -> i64 {
     n
 }
 
-/// Copies every `.mimo`/`.budget` (and a one-level `autosaves/` sibling)
+/// Copies every `.mimo` workspace (and a one-level `autosaves/` sibling)
 /// from `source` into `dest` without deleting anything. Returns the count
 /// of files actually copied so the UI can show a confirmation. We never
 /// overwrite existing destinations - the user can resolve duplicates by
@@ -360,7 +395,7 @@ pub fn migrate_default_folder(source: &Path, dest: &Path) -> Result<i64, String>
     if let Ok(read) = fs::read_dir(source) {
         for dirent in read.flatten() {
             let p = dirent.path();
-            if !p.is_file() || !matches_budget_extension(&p) {
+            if !p.is_file() || !matches_workspace_extension(&p) {
                 continue;
             }
             let name = match p.file_name() {
@@ -378,7 +413,7 @@ pub fn migrate_default_folder(source: &Path, dest: &Path) -> Result<i64, String>
     Ok(copied)
 }
 
-/// Walks the default folder for `.budget` files and rebuilds the cached library.
+/// Walks the default folder for `.mimo` files and rebuilds the cached library.
 /// Subdirectories are scanned shallowly (one level) so users can group years.
 ///
 /// Encrypted files (which can't be probed without the password) are kept
@@ -391,7 +426,7 @@ pub fn scan_library(app: &tauri::AppHandle) -> Result<Vec<LibraryEntry>, String>
     let cached = load_library_index(app).unwrap_or_default();
     let mut entries: Vec<LibraryEntry> = Vec::new();
     let mut visit = |path: PathBuf| {
-        if !matches_budget_extension(&path) {
+        if !matches_workspace_extension(&path) {
             return;
         }
         if db::is_encrypted_at_path(&path) {
@@ -457,7 +492,7 @@ fn encrypted_entry(path: &Path, cached: &[LibraryEntry]) -> LibraryEntry {
     let stub_label = canonical
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("Locked workspace")
+        .unwrap_or("Locked budget")
         .to_string();
     LibraryEntry {
         path: canonical.to_string_lossy().into_owned(),
@@ -470,6 +505,8 @@ fn encrypted_entry(path: &Path, cached: &[LibraryEntry]) -> LibraryEntry {
         expense_net_actual_cents: 0,
         net_actual_cents: 0,
         month_count: 0,
+        year_labels: Vec::new(),
+        year_count: 0,
         encrypted: true,
         provider,
         is_conflict_copy,
@@ -480,7 +517,7 @@ fn encrypted_entry(path: &Path, cached: &[LibraryEntry]) -> LibraryEntry {
 /// Updates (or inserts) a single library entry by re-probing the file. Cheaper
 /// than a full scan; called after Save / Save As / Open.
 pub fn refresh_library_entry(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
-    if !matches_budget_extension(path) {
+    if !matches_workspace_extension(path) {
         return Ok(());
     }
     let entry = read_library_entry(path)?;
@@ -498,10 +535,128 @@ pub fn forget_library_entry(app: &tauri::AppHandle, path: &Path) -> Result<(), S
     save_library_index(app, &entries)
 }
 
-fn matches_budget_extension(path: &Path) -> bool {
+/// Renames a workspace file on disk and updates the cached library index
+/// + recent-files list to point at the new path. The new basename is
+/// sanitised (no path separators, no leading dot, max 120 chars). The
+/// extension is always normalised to `.mimo` since that is the only
+/// supported workspace format. Returns the canonical new path on
+/// success. Errors out if the destination already exists - we never
+/// overwrite blindly because a sibling file with the same name almost
+/// always means the user has data in both.
+pub fn rename_library_file(
+    app: &tauri::AppHandle,
+    old_path: &Path,
+    new_basename: &str,
+) -> Result<PathBuf, String> {
+    if !old_path.is_file() {
+        return Err(format!(
+            "File not found: {}",
+            old_path.to_string_lossy()
+        ));
+    }
+    let cleaned = sanitize_basename(new_basename)?;
+    let parent = old_path
+        .parent()
+        .ok_or_else(|| "File has no parent directory.".to_string())?;
+    let mut new_path = parent.join(&cleaned);
+    new_path.set_extension("mimo");
+
+    let canonical_old = canonicalize_or_self(old_path);
+    let canonical_new_target = canonicalize_or_self(&new_path);
+    if canonical_old == canonical_new_target {
+        return Ok(canonical_old);
+    }
+    if new_path.exists() {
+        return Err(format!(
+            "A file already exists at '{}'. Pick a different name.",
+            new_path.display()
+        ));
+    }
+    fs::rename(old_path, &new_path).map_err(|e| e.to_string())?;
+
+    let canonical_new = canonicalize_or_self(&new_path);
+    let _ = update_recent_path(app, &canonical_old, &canonical_new);
+    let _ = forget_library_entry(app, &canonical_old);
+    let _ = refresh_library_entry(app, &canonical_new);
+    Ok(canonical_new)
+}
+
+/// Permanently deletes a workspace file from disk and prunes it from
+/// the library index and recent-files list. Caller is responsible for
+/// confirming with the user before invoking - this function does not
+/// move to the trash because the project doesn't ship a trash crate
+/// dependency yet.
+pub fn delete_library_file(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
+    if path.is_file() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    let canonical = canonicalize_or_self(path);
+    let _ = remove_recent_path(app, &canonical);
+    forget_library_entry(app, &canonical)
+}
+
+fn sanitize_basename(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Name cannot be empty.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Name cannot contain slashes.".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Name cannot start with a dot.".to_string());
+    }
+    if trimmed.len() > 120 {
+        return Err("Name is too long (max 120 characters).".to_string());
+    }
+    // Strip an extension the user may have typed in - we re-append the
+    // original below so the file type stays consistent.
+    let stem = match Path::new(trimmed)
+        .file_stem()
+        .and_then(|s| s.to_str())
+    {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return Err("Name is not valid.".to_string()),
+    };
+    Ok(stem)
+}
+
+fn update_recent_path(
+    app: &tauri::AppHandle,
+    old_path: &Path,
+    new_path: &Path,
+) -> Result<(), String> {
+    let mut settings = load_settings(app)?;
+    let old_str = old_path.to_string_lossy().into_owned();
+    let new_str = new_path.to_string_lossy().into_owned();
+    let mut changed = false;
+    for r in settings.recent_files.iter_mut() {
+        if same_path(&r.path, &old_str) {
+            r.path = new_str.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        save_settings(app, &settings)?;
+    }
+    Ok(())
+}
+
+fn remove_recent_path(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
+    let mut settings = load_settings(app)?;
+    let target = path.to_string_lossy().into_owned();
+    let before = settings.recent_files.len();
+    settings.recent_files.retain(|r| !same_path(&r.path, &target));
+    if settings.recent_files.len() != before {
+        save_settings(app, &settings)?;
+    }
+    Ok(())
+}
+
+fn matches_workspace_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|s| s.eq_ignore_ascii_case("mimo") || s.eq_ignore_ascii_case("budget"))
+        .map(|s| s.eq_ignore_ascii_case("mimo"))
         .unwrap_or(false)
 }
 

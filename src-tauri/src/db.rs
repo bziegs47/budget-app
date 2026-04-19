@@ -126,8 +126,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             line_identity TEXT NOT NULL,
             sort_order INTEGER NOT NULL,
             name TEXT NOT NULL,
-            planned_cents INTEGER NOT NULL DEFAULT 0,
-            rollover_in_cents INTEGER NOT NULL DEFAULT 0
+            planned_cents INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS income_entries (
@@ -154,7 +153,6 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             sort_order INTEGER NOT NULL,
             name TEXT NOT NULL,
             planned_cents INTEGER NOT NULL DEFAULT 0,
-            rollover_in_cents INTEGER NOT NULL DEFAULT 0,
             is_neutral_transfer INTEGER NOT NULL DEFAULT 0,
             is_sinking_fund INTEGER NOT NULL DEFAULT 0,
             annual_estimate_cents INTEGER,
@@ -182,6 +180,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     migrate_v2_workspace_meta(conn)?;
     migrate_v3_years_table(conn)?;
     migrate_v4_updated_at_columns(conn)?;
+    migrate_v5_drop_rollover_in(conn)?;
     Ok(())
 }
 
@@ -348,6 +347,31 @@ fn migrate_v4_updated_at_columns(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    Ok(())
+}
+
+/// Drops the legacy `rollover_in_cents` column from `income_lines` and
+/// `expense_lines`. The column was only ever an input field in the
+/// per-line UI; nothing in the variance / actual / YTD / export
+/// pipelines ever consumed it, and the only Rust function that referenced
+/// it (`expense_line_end_balance`) was dead code. SQLite ≥ 3.35 supports
+/// `ALTER TABLE ... DROP COLUMN` directly, which is what bundled
+/// rusqlite ships, so this is a single statement per table. The check
+/// guards against running on schemas that already lost the column (new
+/// files created post-v5, or files already migrated once).
+fn migrate_v5_drop_rollover_in(conn: &Connection) -> rusqlite::Result<()> {
+    for table in ["income_lines", "expense_lines"] {
+        let cols = column_names(conn, table)?;
+        if cols.iter().any(|c| c == "rollover_in_cents") {
+            conn.execute_batch(&format!(
+                "ALTER TABLE {table} DROP COLUMN rollover_in_cents;"
+            ))?;
+        }
+    }
+    conn.execute(
+        "UPDATE workspace_meta SET schema_version = MAX(schema_version, 5) WHERE id = 1",
+        [],
+    )?;
     Ok(())
 }
 

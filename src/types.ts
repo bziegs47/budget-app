@@ -13,7 +13,6 @@ export type IncomeLineDto = {
   name: string;
   sortOrder: number;
   plannedCents: number;
-  rolloverInCents: number;
   actualCents: number;
   varianceCents: number;
   entries: IncomeEntryDto[];
@@ -35,7 +34,6 @@ export type ExpenseLineDto = {
   name: string;
   sortOrder: number;
   plannedCents: number;
-  rolloverInCents: number;
   isNeutralTransfer: boolean;
   isSinkingFund: boolean;
   annualEstimateCents: number | null;
@@ -191,6 +189,10 @@ export type LibraryEntry = {
   expenseNetActualCents: number;
   netActualCents: number;
   monthCount: number;
+  /** Distinct calendar years in this budget, sorted descending. */
+  yearLabels?: string[];
+  /** Convenience count; equals `yearLabels?.length ?? 0`. */
+  yearCount?: number;
   encrypted: boolean;
   provider?: string | null;
   isConflictCopy?: boolean;

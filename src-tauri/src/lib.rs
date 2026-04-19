@@ -16,7 +16,6 @@ use tauri::menu::{
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Window};
 use uuid::Uuid;
 
-const MAIN_WINDOW_LABEL: &str = "main";
 const AUTOSAVE_DIR_NAME: &str = "autosaves";
 const AUTOSAVE_KEEP: usize = 5;
 
@@ -99,7 +98,16 @@ impl AppState {
             .paths
             .get(label)
             .cloned()
-            .ok_or_else(|| format!("No file registered for window '{label}'"))
+            .ok_or_else(|| "NO_BUDGET_OPEN: no budget is open in this window".to_string())
+    }
+
+    /// Non-erroring lookup. Returns `Ok(None)` when the window currently
+    /// has no budget registered (e.g. fresh launch on the home screen),
+    /// `Ok(Some(path))` once the user has opened or created one. Used by
+    /// gentle queries that need to render gracefully on launcher views.
+    fn current_path_opt(&self, label: &str) -> Result<Option<PathBuf>, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        Ok(inner.paths.get(label).cloned())
     }
 
     fn switch_path(&self, label: &str, new_path: PathBuf) -> Result<(), String> {
@@ -190,7 +198,7 @@ fn ensure_conn(inner: &mut AppStateInner, label: &str) -> Result<(), String> {
         // that the frontend can match on to surface the unlock modal.
         if let rusqlite::Error::SqliteFailure(err, _) = &e {
             if err.code == rusqlite::ErrorCode::NotADatabase {
-                return "ENCRYPTED: workspace requires a password".to_string();
+                return "ENCRYPTED: budget requires a password".to_string();
             }
         }
         e.to_string()
@@ -208,7 +216,11 @@ fn list_months(
     state: tauri::State<AppState>,
     window: Window,
 ) -> Result<Vec<models::MonthRow>, String> {
-    state.with_conn(&label_of(&window), |conn| commands::list_months(conn))
+    let label = label_of(&window);
+    if state.current_path_opt(&label)?.is_none() {
+        return Ok(Vec::new());
+    }
+    state.with_conn(&label, |conn| commands::list_months(conn))
 }
 
 #[tauri::command]
@@ -238,7 +250,11 @@ fn list_years(
     state: tauri::State<AppState>,
     window: Window,
 ) -> Result<Vec<YearRow>, String> {
-    state.with_conn(&label_of(&window), |conn| commands::list_years(conn))
+    let label = label_of(&window);
+    if state.current_path_opt(&label)?.is_none() {
+        return Ok(Vec::new());
+    }
+    state.with_conn(&label, |conn| commands::list_years(conn))
 }
 
 #[tauri::command]
@@ -404,40 +420,6 @@ fn update_expense_line_flags(
 }
 
 #[tauri::command]
-fn set_expense_line_rollover_in(
-    state: tauri::State<AppState>,
-    window: Window,
-    line_id: i64,
-    cents: i64,
-) -> Result<(), String> {
-    let label = label_of(&window);
-    let result = state.with_conn(&label, |conn| {
-        commands::set_expense_line_rollover_in(conn, line_id, cents)
-    });
-    if result.is_ok() {
-        state.mark_dirty(&label);
-    }
-    result
-}
-
-#[tauri::command]
-fn set_income_line_rollover_in(
-    state: tauri::State<AppState>,
-    window: Window,
-    line_id: i64,
-    cents: i64,
-) -> Result<(), String> {
-    let label = label_of(&window);
-    let result = state.with_conn(&label, |conn| {
-        commands::set_income_line_rollover_in(conn, line_id, cents)
-    });
-    if result.is_ok() {
-        state.mark_dirty(&label);
-    }
-    result
-}
-
-#[tauri::command]
 fn rename_expense_line(
     state: tauri::State<AppState>,
     window: Window,
@@ -561,17 +543,35 @@ fn get_database_path(
     state: tauri::State<AppState>,
     window: Window,
 ) -> Result<String, String> {
-    let p = state.current_path(&label_of(&window))?;
-    Ok(p.to_string_lossy().into_owned())
+    // Returns "" instead of erroring when no budget is open. Frontend
+    // uses falsy-check to decide whether to show file-tied chrome.
+    Ok(state
+        .current_path_opt(&label_of(&window))?
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
+/// True when this window has no real budget open (the user is on the
+/// home/library launcher screens). Kept under the original name for
+/// frontend-compat — the semantics today are "no real budget open"
+/// rather than the legacy "you're on the hidden scratch DB".
 #[tauri::command]
 fn is_default_workspace(
     state: tauri::State<AppState>,
     window: Window,
 ) -> Result<bool, String> {
-    let current = state.current_path(&label_of(&window))?;
-    Ok(paths_equal(&current, &db::database_path()))
+    Ok(state.current_path_opt(&label_of(&window))?.is_none())
+}
+
+/// Inverse of `is_default_workspace` — explicit affirmative form. New
+/// frontend code should prefer this for clarity; both endpoints return
+/// the same underlying truth.
+#[tauri::command]
+fn has_open_budget(
+    state: tauri::State<AppState>,
+    window: Window,
+) -> Result<bool, String> {
+    Ok(state.current_path_opt(&label_of(&window))?.is_some())
 }
 
 #[tauri::command]
@@ -585,7 +585,7 @@ fn save_budget_as(
     let src = state.current_path(&label)?;
     let mut dest = PathBuf::from(&target_path);
     if dest.extension().is_none() {
-        dest.set_extension("budget");
+        dest.set_extension("mimo");
     }
     if let Some(other_label) = state.label_for_canonical(&dest)? {
         if other_label != label {
@@ -672,20 +672,74 @@ fn open_budget_in_new_window(
     Ok(())
 }
 
+/// Swaps the current window's working file in place rather than spawning a
+/// new window. Used from the welcome screen so the very first workspace
+/// pick after launch reuses the window the user is already looking at.
+/// If the requested file is already open in another window, that window
+/// is focused and the current window stays on whatever it was showing
+/// (so we don't accidentally orphan the user's in-flight scratch state).
+#[tauri::command]
+fn open_budget_in_current_window(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    window: Window,
+    file_path: String,
+) -> Result<(), String> {
+    let path = PathBuf::from(&file_path);
+    if !path.exists() {
+        return Err(format!("File not found: {}", path.display()));
+    }
+    let label = label_of(&window);
+
+    if let Some(existing_label) = state.label_for_canonical(&path)? {
+        if existing_label != label {
+            if let Some(existing_window) = app_handle.get_webview_window(&existing_label) {
+                let _ = existing_window.set_focus();
+                return Ok(());
+            }
+        } else {
+            // Already open in this very window - nothing to swap, but still
+            // refresh recents so the timestamp moves to "now".
+            let _ = settings::upsert_recent(&app_handle, &path, "");
+            return Ok(());
+        }
+    }
+
+    state.switch_path(&label, path.clone())?;
+    state.mark_clean(&label);
+
+    let _ = window.set_title(&window_title_from_path(&path));
+
+    let year_label = state
+        .with_conn(&label, |conn| commands::get_workspace_meta(conn))
+        .map(|m| m.year_label)
+        .unwrap_or_default();
+    let _ = settings::upsert_recent(&app_handle, &path, &year_label);
+    let _ = settings::refresh_library_entry(&app_handle, &path);
+
+    Ok(())
+}
+
 #[tauri::command]
 fn save_snapshot(
     state: tauri::State<AppState>,
     window: Window,
 ) -> Result<String, String> {
     let label = label_of(&window);
-    let src = state.current_path(&label)?;
+    // No-op when the window has no budget open. Previous versions would
+    // happily snapshot the hidden scratch DB into ~/Library, leaving an
+    // accumulating pile of useless backup files. Now snapshots only fire
+    // for real `.mimo` files.
+    let Some(src) = state.current_path_opt(&label)? else {
+        return Ok(String::new());
+    };
     let parent = src
         .parent()
         .ok_or_else(|| "Working file has no parent directory".to_string())?;
     let stem = src
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "budget".to_string());
+        .unwrap_or_else(|| "mimo".to_string());
     let backups_dir = parent.join(AUTOSAVE_DIR_NAME);
     std::fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
 
@@ -721,6 +775,63 @@ fn sync_autosave_menu_check(app_handle: &tauri::AppHandle, enabled: bool) {
     if let MenuItemKind::Check(check) = item {
         let _ = check.set_checked(enabled);
     }
+}
+
+/// Items that only make sense once a real `.mimo` file is open. They
+/// stay greyed on the launcher screens (home + library) so the user
+/// can't trigger commands that would silently fail or operate on a
+/// budget that doesn't exist yet.
+const IN_BUDGET_MENU_IDS: &[&str] = &[
+    "save_as",
+    "export_csv",
+    "export_json",
+    "export_csv_redacted",
+    "export_json_redacted",
+    "toggle_autosave",
+    "show_overview",
+    "show_reports",
+    "next_month",
+    "prev_month",
+    "duplicate_year",
+    "rename_year",
+    "delete_year",
+    "reorganize",
+    "set_password",
+    "change_password",
+    "remove_password",
+];
+
+/// Toggles the enabled state of the in-budget menu items based on
+/// what the focused window is showing. The frontend calls this on
+/// view changes (welcome ↔ overview, etc.) and on focus events so
+/// macOS's single shared menu bar always reflects the active window.
+#[tauri::command]
+fn set_menu_context(
+    app_handle: tauri::AppHandle,
+    has_budget: bool,
+    on_library: bool,
+) -> Result<(), String> {
+    let Some(menu) = app_handle.menu() else {
+        return Ok(());
+    };
+    for id in IN_BUDGET_MENU_IDS {
+        if let Some(item) = menu.get(*id) {
+            let enabled = match item {
+                MenuItemKind::MenuItem(m) => m.set_enabled(has_budget).is_ok(),
+                MenuItemKind::Check(c) => c.set_enabled(has_budget).is_ok(),
+                _ => true,
+            };
+            let _ = enabled;
+        }
+    }
+    // "Show Library" makes sense from inside any budget but is
+    // redundant when you're already on the library screen.
+    if let Some(item) = menu.get("show_library") {
+        if let MenuItemKind::MenuItem(m) = item {
+            let _ = m.set_enabled(!on_library);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -784,7 +895,7 @@ fn check_external_rename(
 }
 
 /// Sets the workspace year label, and (if the workspace is linked to a real
-/// `.budget` file) renames the file on disk to match. The new path is returned
+/// `.mimo` file) renames the file on disk to match. The new path is returned
 /// so the frontend can refresh its title/state.
 #[tauri::command]
 fn set_workspace_year(
@@ -803,7 +914,7 @@ fn set_workspace_year(
     }
     let parent = current
         .parent()
-        .ok_or_else(|| "Workspace file has no parent directory".to_string())?;
+        .ok_or_else(|| "Budget file has no parent directory".to_string())?;
     let mut new_path = parent.join(&cleaned);
     new_path.set_extension("mimo");
     if paths_equal(&new_path, &current) {
@@ -1002,6 +1113,7 @@ fn export_month_json_redacted(
 #[tauri::command]
 fn get_settings(app_handle: tauri::AppHandle) -> Result<AppSettings, String> {
     let mut settings = settings::load_settings(&app_handle)?;
+    let mut dirty = false;
     if settings
         .default_folder
         .as_ref()
@@ -1010,6 +1122,15 @@ fn get_settings(app_handle: tauri::AppHandle) -> Result<AppSettings, String> {
     {
         let folder = settings::ensure_default_folder(&app_handle)?;
         settings.default_folder = Some(folder.to_string_lossy().into_owned());
+        dirty = true;
+    }
+    // Drop stale recents (files renamed/deleted outside the app) so the
+    // welcome screen never shows a workspace name that no longer exists.
+    if settings::prune_missing_recents(&mut settings) {
+        dirty = true;
+    }
+    if dirty {
+        settings::save_settings(&app_handle, &settings)?;
     }
     Ok(settings)
 }
@@ -1116,6 +1237,48 @@ fn decrypt_workspace(state: tauri::State<AppState>, window: Window) -> Result<()
     Ok(())
 }
 
+/// Renames a workspace file in place. Refuses if the file is currently
+/// open in any window so we never rename out from under an active
+/// connection (SQLite holds the path in WAL/shm sidecars, and renaming
+/// while open is a quick way to corrupt them on macOS).
+#[tauri::command]
+fn rename_workspace_file(
+    state: tauri::State<AppState>,
+    app_handle: tauri::AppHandle,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if let Some(label) = state.label_for_canonical(&p)? {
+        // Hide the internal label - the user only cares that another
+        // window has the file open.
+        let _ = label;
+        return Err(
+            "This budget is open in another window. Close it first, then try renaming.".into(),
+        );
+    }
+    let new_path = settings::rename_library_file(&app_handle, &p, &new_name)?;
+    Ok(new_path.to_string_lossy().into_owned())
+}
+
+/// Permanently deletes a workspace file and prunes it from caches.
+/// Same "not currently open" guard as rename - we won't yank a file out
+/// from under a live connection.
+#[tauri::command]
+fn delete_workspace_file(
+    state: tauri::State<AppState>,
+    app_handle: tauri::AppHandle,
+    path: String,
+) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if let Some(_label) = state.label_for_canonical(&p)? {
+        return Err(
+            "This budget is open in another window. Close it first, then try deleting.".into(),
+        );
+    }
+    settings::delete_library_file(&app_handle, &p)
+}
+
 #[tauri::command]
 fn detect_cloud_folders(
     app_handle: tauri::AppHandle,
@@ -1123,7 +1286,7 @@ fn detect_cloud_folders(
     settings::probe_cloud_folders(&app_handle)
 }
 
-/// Copies all `.mimo`/`.budget` files from the current default folder
+/// Copies all `.mimo` files from the current default folder
 /// into `new_path`, then sets `new_path` as the default. Existing files
 /// at the destination are skipped (never overwritten) so divergent edits
 /// stay safe. Returns `(copied_count, dest_path)`.
@@ -1168,15 +1331,20 @@ fn get_library_index(app_handle: tauri::AppHandle) -> Result<Vec<LibraryEntry>, 
     settings::load_library_index(&app_handle)
 }
 
-/// Creates a new `.budget` file inside the default folder, scaffolds Jan-Dec
-/// for the requested year, and opens it in a new window. The returned path is
-/// the absolute path of the new file.
+/// Creates a new `.mimo` file inside the default folder, scaffolds Jan-Dec
+/// for the requested year, and opens it. By default the new workspace
+/// opens in a fresh window; when `reuse_current_window` is true (used
+/// from the welcome screen), the calling window swaps its working file
+/// in place instead so the user keeps their existing window. The
+/// returned path is the absolute path of the new file.
 #[tauri::command]
 fn create_year_workspace(
     app_handle: tauri::AppHandle,
     state: tauri::State<AppState>,
+    window: Window,
     year_label: String,
     scaffold_year_value: Option<i32>,
+    reuse_current_window: Option<bool>,
 ) -> Result<String, String> {
     let folder = settings::ensure_default_folder(&app_handle)?;
     let cleaned = commands::sanitize_year_label(&year_label)?;
@@ -1205,6 +1373,17 @@ fn create_year_workspace(
             return Ok(path.to_string_lossy().into_owned());
         }
     }
+
+    if reuse_current_window.unwrap_or(false) {
+        let label = label_of(&window);
+        state.switch_path(&label, path.clone())?;
+        state.mark_clean(&label);
+        let _ = window.set_title(&window_title_from_path(&path));
+        let _ = settings::upsert_recent(&app_handle, &path, &cleaned);
+        let _ = settings::refresh_library_entry(&app_handle, &path);
+        return Ok(path.to_string_lossy().into_owned());
+    }
+
     let label = format!("mimo-{}", &Uuid::new_v4().simple().to_string()[..12]);
     state.register_path(&label, path.clone())?;
     let stagger = stagger_for_new_window(&app_handle);
@@ -1312,8 +1491,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
-            let state = app.state::<AppState>();
-            state.register_path(MAIN_WINDOW_LABEL, db::database_path())?;
+            // The main window starts with NO budget registered. The hidden
+            // scratch SQLite that previous versions auto-opened on launch
+            // is gone — home is now a true launcher state, and the first
+            // backend connection only happens once the user opens a real
+            // `.mimo` file or creates one via "New budget…". This keeps
+            // launcher views from accidentally running data queries
+            // against a phantom default file.
+            let _ = app.state::<AppState>();
             // Make sure ~/Documents/Budget exists before the UI asks for it.
             let _ = settings::ensure_default_folder(&app.handle());
 
@@ -1379,8 +1564,6 @@ pub fn run() {
             ensure_year_months,
             set_income_line_planned,
             set_expense_line_planned,
-            set_expense_line_rollover_in,
-            set_income_line_rollover_in,
             add_expense_line,
             update_expense_line_flags,
             rename_expense_line,
@@ -1394,9 +1577,12 @@ pub fn run() {
             get_database_path,
             save_budget_as,
             is_default_workspace,
+            has_open_budget,
+            set_menu_context,
             is_dirty,
             mark_clean,
             open_budget_in_new_window,
+            open_budget_in_current_window,
             save_snapshot,
             get_auto_save,
             set_auto_save,
@@ -1423,6 +1609,8 @@ pub fn run() {
             set_default_folder,
             detect_cloud_folders,
             adopt_default_folder,
+            rename_workspace_file,
+            delete_workspace_file,
             encryption_supported,
             workspace_is_encrypted,
             unlock_workspace,
@@ -1442,7 +1630,7 @@ pub fn run() {
 }
 
 fn build_menu(app: &mut tauri::App) -> tauri::Result<()> {
-    let new_year = MenuItemBuilder::with_id("new_year", "New Year…")
+    let new_year = MenuItemBuilder::with_id("new_year", "New Budget…")
         .accelerator("Cmd+N")
         .build(app)?;
     let open_file = MenuItemBuilder::with_id("open_file", "Open…")
@@ -1455,13 +1643,13 @@ fn build_menu(app: &mut tauri::App) -> tauri::Result<()> {
         MenuItemBuilder::with_id("show_default_folder", "Show Default Folder in Finder")
             .build(app)?;
     let export_csv =
-        MenuItemBuilder::with_id("export_csv", "Workspace as CSV…").build(app)?;
+        MenuItemBuilder::with_id("export_csv", "Budget as CSV…").build(app)?;
     let export_json =
-        MenuItemBuilder::with_id("export_json", "Workspace as JSON…").build(app)?;
+        MenuItemBuilder::with_id("export_json", "Budget as JSON…").build(app)?;
     let export_csv_redacted =
-        MenuItemBuilder::with_id("export_csv_redacted", "Workspace as CSV (redacted)…").build(app)?;
+        MenuItemBuilder::with_id("export_csv_redacted", "Budget as CSV (redacted)…").build(app)?;
     let export_json_redacted =
-        MenuItemBuilder::with_id("export_json_redacted", "Workspace as JSON (redacted)…")
+        MenuItemBuilder::with_id("export_json_redacted", "Budget as JSON (redacted)…")
             .build(app)?;
     let toggle_autosave = CheckMenuItemBuilder::with_id("toggle_autosave", "Auto-save Snapshots")
         .checked(false)

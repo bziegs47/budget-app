@@ -951,6 +951,10 @@ body {
   grid-template-columns: 44px minmax(0, 1fr);
 }
 
+.app-layout.sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -1629,6 +1633,7 @@ body {
 }
 
 .library-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -1641,6 +1646,7 @@ body {
   color: var(--text);
   cursor: pointer;
   transition: border-color 0.12s ease, transform 0.12s ease;
+  outline: none;
 }
 
 .library-card:hover {
@@ -1648,11 +1654,68 @@ body {
   transform: translateY(-1px);
 }
 
+.library-card:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.library-card-actions {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  gap: 0.15rem;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 1;
+}
+
+.library-card:hover .library-card-actions,
+.library-card:focus-within .library-card-actions {
+  opacity: 1;
+}
+
+.library-card-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.library-card-action:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.library-card-action.danger:hover {
+  color: #b8413a;
+  border-color: #d18a85;
+  background: color-mix(in srgb, #d18a85 14%, var(--surface));
+}
+
+.library-card-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 1px;
+}
+
 .library-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  /* Reserve room for the absolutely-positioned rename/delete overlay
+     so badges and the workspace name don't slide underneath it. */
+  padding-right: 3.4rem;
+  min-height: 24px;
 }
 
 .library-card-year {
@@ -2487,6 +2550,9 @@ body {
 @media (max-width: 760px) {
   .app-layout {
     grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .app-layout.sidebar-hidden {
+    grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
     padding: 0.5rem 0.35rem;

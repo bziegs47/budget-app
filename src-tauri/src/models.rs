@@ -55,7 +55,6 @@ pub struct IncomeLineDto {
     pub name: String,
     pub sort_order: i32,
     pub planned_cents: i64,
-    pub rollover_in_cents: i64,
     pub actual_cents: i64,
     pub variance_cents: i64,
     pub entries: Vec<IncomeEntryDto>,
@@ -81,7 +80,6 @@ pub struct ExpenseLineDto {
     pub name: String,
     pub sort_order: i32,
     pub planned_cents: i64,
-    pub rollover_in_cents: i64,
     pub is_neutral_transfer: bool,
     pub is_sinking_fund: bool,
     pub annual_estimate_cents: Option<i64>,
@@ -360,6 +358,14 @@ pub struct LibraryEntry {
     pub expense_net_actual_cents: i64,
     pub net_actual_cents: i64,
     pub month_count: i64,
+    /// Distinct calendar years stored in this budget, sorted descending
+    /// (most recent first). Empty for legacy / encrypted entries.
+    #[serde(default)]
+    pub year_labels: Vec<String>,
+    /// Convenience count to avoid an extra `.length` plumb in the UI.
+    /// Always equal to `year_labels.len()` when `year_labels` is set.
+    #[serde(default)]
+    pub year_count: i64,
     pub encrypted: bool,
     /// Cloud provider derived from the path prefix (e.g. "iCloud Drive",
     /// "Google Drive"). `None` when the file lives in a local-only folder.
@@ -385,7 +391,7 @@ pub struct CloudFolderProbe {
     pub path: String,
     pub exists: bool,
     pub is_default: bool,
-    /// Number of `.mimo`/`.budget` files visible in the candidate folder
+    /// Number of `.mimo` files visible in the candidate folder
     /// (one-level scan). Helps the user pick the folder that already has
     /// their data when several providers are installed.
     pub workspace_count: i64,

@@ -230,15 +230,15 @@ function SaveStatusPill({
           type="button"
           className="status-pill warn clickable"
           onClick={onSaveAs}
-          title="Default workspace — Save As to keep these changes in your own .mimo file"
+          title="Default budget — Save As to keep these changes in your own .mimo file"
         >
           <span className="status-dot" /> Unsaved · Save As…
         </button>
       );
     }
     return (
-      <span className="status-pill muted-pill" title="Default workspace">
-        <span className="status-dot" /> Scratch workspace
+      <span className="status-pill muted-pill" title="Default budget">
+        <span className="status-dot" /> Scratch budget
       </span>
     );
   }
@@ -872,20 +872,33 @@ function BucketReorderModal({
   );
 }
 
+type UnsavedChangesMode = "close" | "quit";
+
 function UnsavedChangesModal({
   open,
   busy,
+  mode,
   onSave,
   onDiscard,
   onCancel,
 }: {
   open: boolean;
   busy: boolean;
+  mode: UnsavedChangesMode;
   onSave: () => void;
   onDiscard: () => void;
   onCancel: () => void;
 }) {
   if (!open) return null;
+  // "close" is the per-window flow (red X / Cmd+W). "quit" is reserved
+  // for an actual app-wide exit prompt - we keep it parameterized so a
+  // future Cmd+Q interceptor can reuse the same component.
+  const isQuit = mode === "quit";
+  const title = isQuit
+    ? "Save changes before quitting?"
+    : "Save changes before closing?";
+  const discardLabel = isQuit ? "Quit without saving" : "Close without saving";
+  const saveIdle = isQuit ? "Save & quit" : "Save & close";
   return (
     <div
       className="modal-backdrop"
@@ -902,11 +915,11 @@ function UnsavedChangesModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="unsaved-changes-title" className="modal-title">
-          Save changes before quitting?
+          {title}
         </h2>
         <p className="modal-hint">
-          This workspace has not been saved to a <code>.mimo</code> file. Save it now or your
-          changes will only remain in this app's default workspace.
+          This budget has not been saved to a <code>.mimo</code> file. Save it now or your
+          changes will only remain in this app's default budget.
         </p>
         <div className="modal-actions unsaved-changes-actions">
           <button
@@ -923,7 +936,7 @@ function UnsavedChangesModal({
             onClick={onDiscard}
             disabled={busy}
           >
-            Quit without saving
+            {discardLabel}
           </button>
           <button
             type="button"
@@ -932,7 +945,7 @@ function UnsavedChangesModal({
             disabled={busy}
             autoFocus
           >
-            {busy ? "Saving…" : "Save & quit"}
+            {busy ? "Saving…" : saveIdle}
           </button>
         </div>
       </div>
@@ -940,10 +953,18 @@ function UnsavedChangesModal({
   );
 }
 
+// The router state. Each kind corresponds to a single screen, with no
+// hidden sub-modes. `years-landing` is the per-budget "pick a year"
+// list; `year-overview` is the dashboard for one specific year. The
+// previous `overview` kind multiplexed both based on whether `yearId`
+// was null, and also had a third dead branch that fell back to the
+// welcome screen on an empty workspace — now unreachable since the
+// scratch DB is gone and bootstrap routes empties to `welcome`.
 type AppView =
   | { kind: "welcome" }
   | { kind: "library" }
-  | { kind: "overview"; yearId: number | null }
+  | { kind: "years-landing" }
+  | { kind: "year-overview"; yearId: number }
   | { kind: "reports" }
   | { kind: "cross-year" }
   | { kind: "month"; monthId: number };
@@ -1067,7 +1088,7 @@ function Sidebar({
 }) {
   if (collapsed) {
     return (
-      <aside className="sidebar collapsed" aria-label="Workspace sidebar">
+      <aside className="sidebar collapsed" aria-label="Budget sidebar">
         <button
           type="button"
           className="sidebar-collapse-tab"
@@ -1083,10 +1104,10 @@ function Sidebar({
 
   const activeYear = years.find((y) => y.id === sidebarYearId) ?? null;
   const overviewActive =
-    view.kind === "overview" && activeYear != null && view.yearId === activeYear.id;
+    view.kind === "year-overview" && activeYear != null && view.yearId === activeYear.id;
 
   return (
-    <aside className="sidebar" aria-label="Workspace sidebar">
+    <aside className="sidebar" aria-label="Budget sidebar">
       <div className="sidebar-header">
         <div
           className={`sidebar-workspace${
@@ -1094,7 +1115,7 @@ function Sidebar({
           }`}
           title={workspacePathTooltip}
         >
-          <span className="sidebar-workspace-eyebrow">Workspace</span>
+          <span className="sidebar-workspace-eyebrow">Budget</span>
           <span className="sidebar-workspace-title">{workspaceTitle}</span>
         </div>
         {activeYear ? (
@@ -1126,10 +1147,10 @@ function Sidebar({
                   type="button"
                   className="sidebar-month-main"
                   onClick={onShowCrossYear}
-                  title="Compare all years in this workspace"
+                  title="Compare all years in this budget"
                 >
                   <span className="sidebar-month-label">
-                    All years in this workspace
+                    All years in this budget
                   </span>
                 </button>
               </li>
@@ -1238,7 +1259,6 @@ function Sidebar({
 }
 
 function WelcomeScreen({
-  defaultFolder,
   recentFiles,
   busy,
   onCreateYear,
@@ -1247,7 +1267,6 @@ function WelcomeScreen({
   onOpenRecent,
   onRevealFolder,
 }: {
-  defaultFolder: string | null;
   recentFiles: RecentFile[];
   busy: boolean;
   onCreateYear: () => void;
@@ -1260,11 +1279,6 @@ function WelcomeScreen({
     <div className="welcome-screen">
       <div className="welcome-hero">
         <h1>Welcome to mimo</h1>
-        <p className="welcome-sub">
-          Your <code>.mimo</code> files live in{" "}
-          <code>{defaultFolder ?? "~/Documents/Budget"}</code>. Each file holds one
-          year of budgeting. Open or create one to begin.
-        </p>
       </div>
 
       <div className="welcome-cards">
@@ -1274,24 +1288,11 @@ function WelcomeScreen({
           onClick={onCreateYear}
           disabled={busy}
         >
-          <span className="welcome-card-eyebrow">Start a new year</span>
+          <span className="welcome-card-eyebrow">Create</span>
           <span className="welcome-card-title">Create a budget</span>
           <span className="welcome-card-sub">
-            Picks a calendar year, scaffolds 12 months, and saves a fresh{" "}
-            <code>.mimo</code> file.
-          </span>
-        </button>
-        <button
-          type="button"
-          className="welcome-card"
-          onClick={onOpenFile}
-          disabled={busy}
-        >
-          <span className="welcome-card-eyebrow">Have a file?</span>
-          <span className="welcome-card-title">Open existing budget…</span>
-          <span className="welcome-card-sub">
-            Opens any <code>.mimo</code> (or legacy <code>.budget</code>) file in a new
-            window.
+            Names a new <code>.mimo</code> file in your default folder and
+            scaffolds the current year's months for you.
           </span>
         </button>
         <button
@@ -1301,9 +1302,21 @@ function WelcomeScreen({
           disabled={busy}
         >
           <span className="welcome-card-eyebrow">Browse</span>
-          <span className="welcome-card-title">Library of years</span>
+          <span className="welcome-card-title">Browse the library</span>
           <span className="welcome-card-sub">
-            See every <code>.mimo</code> file in your default folder, with summaries.
+            See every budget in your default folder, with summaries.
+          </span>
+        </button>
+        <button
+          type="button"
+          className="welcome-card"
+          onClick={onOpenFile}
+          disabled={busy}
+        >
+          <span className="welcome-card-eyebrow">Open</span>
+          <span className="welcome-card-title">Open an existing budget…</span>
+          <span className="welcome-card-sub">
+            Opens any <code>.mimo</code> file from anywhere on disk.
           </span>
         </button>
       </div>
@@ -1326,7 +1339,7 @@ function WelcomeScreen({
                   className="recent-item"
                   onClick={() => onOpenRecent(r.path)}
                 >
-                  <span className="recent-name">{r.yearLabel || basename(r.path)}</span>
+                  <span className="recent-name">{basename(r.path) || r.yearLabel}</span>
                   <span className="recent-path muted">{r.path}</span>
                 </button>
               </li>
@@ -1429,7 +1442,7 @@ function YearsLanding({
           >
             <span className="years-landing-card-year">+ New year</span>
             <span className="years-landing-card-meta muted">
-              Adds Jan–Dec to this file.
+              Adds Jan–Dec to this budget.
             </span>
           </button>
         </li>
@@ -1441,7 +1454,7 @@ function YearsLanding({
 function basename(path: string): string {
   const parts = path.split(/[/\\]/);
   const last = parts[parts.length - 1] ?? path;
-  return last.replace(/\.(mimo|budget)$/i, "");
+  return last.replace(/\.mimo$/i, "");
 }
 
 function LibraryView({
@@ -1452,6 +1465,8 @@ function LibraryView({
   onOpen,
   onCreateYear,
   onRevealFolder,
+  onRenameWorkspace,
+  onDeleteWorkspace,
 }: {
   entries: LibraryEntry[];
   defaultFolder: string | null;
@@ -1460,12 +1475,29 @@ function LibraryView({
   onOpen: (path: string) => void;
   onCreateYear: () => void;
   onRevealFolder: () => void;
+  onRenameWorkspace: (entry: LibraryEntry) => void;
+  onDeleteWorkspace: (entry: LibraryEntry) => void;
 }) {
+  // Tiles read top-down alphabetically so users can scan a long library
+  // by name. We use locale-aware comparison so accented or non-ASCII
+  // workspace names land where users expect them. The backend returns
+  // entries sorted by mtime, which is useful for the sidebar but not
+  // for a grid that's about identification.
+  const sortedEntries = useMemo(
+    () =>
+      [...entries].sort((a, b) =>
+        basename(a.path).localeCompare(basename(b.path), undefined, {
+          sensitivity: "base",
+          numeric: true,
+        }),
+      ),
+    [entries],
+  );
   return (
     <div className="library-view">
       <header className="library-header">
         <div>
-          <h1>Years library</h1>
+          <h1>Budget library</h1>
           <p className="muted">
             From <code>{defaultFolder ?? "~/Documents/Budget"}</code>
           </p>
@@ -1478,18 +1510,18 @@ function LibraryView({
             {busy ? "Scanning…" : "Rescan"}
           </button>
           <button type="button" className="btn primary" onClick={onCreateYear}>
-            <PlusIcon /> New year budget
+            <PlusIcon /> New budget
           </button>
         </div>
       </header>
-      {entries.length === 0 ? (
+      {sortedEntries.length === 0 ? (
         <div className="library-empty">
-          <p>No <code>.mimo</code> files found in your default folder yet.</p>
-          <p className="muted">Create a new year, or open one from elsewhere.</p>
+          <p>No budget files found in your default folder yet.</p>
+          <p className="muted">Create one above, or open an existing file from elsewhere.</p>
         </div>
       ) : (
         <ul className="library-grid">
-          {entries.map((e) => {
+          {sortedEntries.map((e) => {
             const lastEdited = e.lastEditedAt ?? e.lastModified;
             const tooltipParts: string[] = [];
             tooltipParts.push(`Last edited ${formatRelative(lastEdited)}`);
@@ -1499,21 +1531,59 @@ function LibraryView({
               );
             }
             tooltipParts.push(e.path);
+            const name = basename(e.path);
+            const cardClass = [
+              "library-card",
+              e.isConflictCopy ? "is-conflict" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
             return (
               <li
                 key={e.path}
                 className={e.isConflictCopy ? "library-grid-item conflict" : "library-grid-item"}
               >
-                <button
-                  type="button"
-                  className={`library-card ${
-                    e.isConflictCopy ? "is-conflict" : ""
-                  }`}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className={cardClass}
                   onClick={() => onOpen(e.path)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter" || ev.key === " ") {
+                      ev.preventDefault();
+                      onOpen(e.path);
+                    }
+                  }}
                   title={tooltipParts.join("\n")}
                 >
+                  <div className="library-card-actions" onClick={(ev) => ev.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="library-card-action"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        onRenameWorkspace(e);
+                      }}
+                      title={`Rename ${name}`}
+                      aria-label={`Rename ${name}`}
+                    >
+                      <PencilIcon size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="library-card-action danger"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        onDeleteWorkspace(e);
+                      }}
+                      title={`Delete ${name}`}
+                      aria-label={`Delete ${name}`}
+                    >
+                      <TrashIcon size={14} />
+                    </button>
+                  </div>
                   <div className="library-card-head">
-                    <span className="library-card-year">{basename(e.path)}</span>
+                    <span className="library-card-year">{name}</span>
                     <div className="library-card-badges">
                       {e.provider && (
                         <span
@@ -1542,7 +1612,29 @@ function LibraryView({
                     </div>
                   </div>
                   <div className="library-card-meta muted">
-                    Edited {formatRelative(lastEdited)} · {e.monthCount} months
+                    {(() => {
+                      // Multi-year files now exist, so the tile shows
+                      // "N years (low–high)" when the budget spans
+                      // more than one calendar year. For single-year
+                      // files we just print the year. The basename
+                      // already labels the file so we don't repeat it.
+                      const labels = e.yearLabels ?? [];
+                      let yearText: string;
+                      if (labels.length === 0) {
+                        yearText = e.encrypted ? "Locked" : "No years";
+                      } else if (labels.length === 1) {
+                        yearText = labels[0];
+                      } else {
+                        const sorted = [...labels].sort();
+                        yearText = `${labels.length} years (${sorted[0]}–${sorted[sorted.length - 1]})`;
+                      }
+                      const monthText = `${e.monthCount} ${e.monthCount === 1 ? "month" : "months"} tracked`;
+                      return (
+                        <>
+                          Edited {formatRelative(lastEdited)} · {yearText} · {monthText}
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="library-card-totals">
                     <div>
@@ -1564,7 +1656,7 @@ function LibraryView({
                       </span>
                     </div>
                   </div>
-                </button>
+                </div>
               </li>
             );
           })}
@@ -1779,7 +1871,7 @@ function CrossYearView({
         <header className="year-overview-header">
           <h1>All years</h1>
           <p className="muted">
-            This workspace doesn't have any years yet. Create one from the
+            This budget doesn't have any years yet. Create one from the
             sidebar to start a multi-year comparison.
           </p>
         </header>
@@ -1794,7 +1886,7 @@ function CrossYearView({
   return (
     <div className="year-overview cross-year-view">
       <header className="year-overview-header">
-        <h1>All years in this workspace</h1>
+        <h1>All years in this budget</h1>
         <p className="muted">
           Comparing {columns.length} {columns.length === 1 ? "year" : "years"}.
           Click a column header to open that year's overview.
@@ -2323,7 +2415,7 @@ function ReportsView({
       </section>
 
       <section className="card reports-picker">
-        <h2>Lines in this workspace</h2>
+        <h2>Lines in this budget</h2>
         {catalogLoading ? (
           <p className="muted">Loading catalog…</p>
         ) : catalog.length === 0 ? (
@@ -2710,7 +2802,7 @@ const PREFERENCE_SECTIONS: ReadonlyArray<{
   {
     id: "general",
     label: "General",
-    description: "Workspace defaults that apply to every file you open.",
+    description: "Budget defaults that apply to every file you open.",
   },
 ];
 
@@ -2759,16 +2851,16 @@ function PasswordModal({
   };
   const title =
     kind === "set"
-      ? "Protect this workspace"
+      ? "Protect this budget"
       : kind === "change"
         ? "Change password"
-        : "Unlock workspace";
+        : "Unlock budget";
   const help =
     kind === "set"
       ? "Choose a password to encrypt this file with SQLCipher. There is no recovery — losing the password means losing the data."
       : kind === "change"
         ? "Pick a new password. Old backups still need the old password."
-        : "Enter the password for this workspace.";
+        : "Enter the password for this budget.";
   return (
     <div
       className="modal-backdrop"
@@ -2966,7 +3058,7 @@ function PreferencesModal({
         // Surface a non-blocking confirmation so the user can see what
         // moved without us imposing yet another modal.
         onError(
-          `Copied ${copied} workspace${copied === 1 ? "" : "s"} into ${probe.provider}.`,
+          `Copied ${copied} budget${copied === 1 ? "" : "s"} into ${probe.provider}.`,
         );
       }
     } catch (e) {
@@ -3101,7 +3193,7 @@ function PreferencesModal({
 
                 <div className="preferences-field">
                   <label className="preferences-label" htmlFor="prefs-display-name">
-                    Workspace name
+                    Budget name
                   </label>
                   <p className="muted preferences-help">
                     A friendly label for this file. Shown in the sidebar and
@@ -3146,7 +3238,7 @@ function PreferencesModal({
                   </div>
                   {isDefaultWorkspace && (
                     <p className="muted preferences-status">
-                      Save this workspace to a file before naming it.
+                      Save this budget to a file before naming it.
                     </p>
                   )}
                 </div>
@@ -3204,7 +3296,7 @@ function PreferencesModal({
                               </code>
                               {probe.exists && (
                                 <span className="muted preferences-cloud-meta">
-                                  {probe.workspaceCount} workspace
+                                  {probe.workspaceCount} budget
                                   {probe.workspaceCount === 1 ? "" : "s"} here
                                 </span>
                               )}
@@ -3255,7 +3347,7 @@ function PreferencesModal({
                   </button>
                   {showDiagnostics && (
                     <dl className="preferences-diagnostics-list">
-                      <dt>Workspace ID</dt>
+                      <dt>Budget ID</dt>
                       <dd>
                         <code>{workspaceMeta?.fileUuid || "—"}</code>
                       </dd>
@@ -3290,8 +3382,14 @@ function PreferencesModal({
   );
 }
 
+// Dual-purpose create modal. From the home screen / Library it acts as a
+// "New budget" wizard (free-text name, scaffolds a brand-new `.mimo` file
+// for the current calendar year). From inside an existing budget — sidebar
+// or year-landing — it stays the legacy 4-digit "New year" prompt that
+// adds another calendar year to the active file.
 function CreateYearModal({
   open,
+  mode,
   defaultYear,
   busy,
   existingLabels,
@@ -3299,12 +3397,14 @@ function CreateYearModal({
   onCreate,
 }: {
   open: boolean;
+  mode: "budget" | "year";
   defaultYear: number;
   busy: boolean;
   existingLabels: string[];
   onCancel: () => void;
   onCreate: (label: string) => void;
 }) {
+  const isBudgetMode = mode === "budget";
   const [label, setLabel] = useState(String(defaultYear));
   const [touched, setTouched] = useState(false);
   useEffect(() => {
@@ -3312,19 +3412,35 @@ function CreateYearModal({
       setLabel(String(defaultYear));
       setTouched(false);
     }
-  }, [open, defaultYear]);
+  }, [open, defaultYear, mode]);
   useModalEscape(open && !busy, onCancel);
   if (!open) return null;
   const trimmed = label.trim();
-  const validShape = /^\d{4}$/.test(trimmed);
-  const dup = existingLabels.includes(trimmed);
-  const error = !trimmed
-    ? "Enter a 4-digit year"
-    : !validShape
-    ? "Use a 4-digit year (e.g. 2026)"
-    : dup
-    ? "That year already exists in this file"
-    : null;
+  let error: string | null = null;
+  if (isBudgetMode) {
+    // Mirror sanitize_year_label on the backend: strip filesystem-hostile
+    // characters and cap at 64 chars. We only validate non-empty + length
+    // here; collision detection happens at submit-time via the backend
+    // (which knows what's already in the default folder).
+    const HOSTILE = /[\/\\:*?"<>|\x00]/;
+    if (!trimmed) {
+      error = "Enter a budget name.";
+    } else if (HOSTILE.test(trimmed)) {
+      error = "Avoid / \\ : * ? \" < > | in the name.";
+    } else if (trimmed.length > 64) {
+      error = "Name is too long (max 64 characters).";
+    }
+  } else {
+    const validShape = /^\d{4}$/.test(trimmed);
+    const dup = existingLabels.includes(trimmed);
+    if (!trimmed) {
+      error = "Enter a 4-digit year.";
+    } else if (!validShape) {
+      error = "Use a 4-digit year (e.g. 2026).";
+    } else if (dup) {
+      error = "That year already exists in this budget.";
+    }
+  }
   const submit = () => {
     if (error) {
       setTouched(true);
@@ -3337,6 +3453,12 @@ function CreateYearModal({
     e.stopPropagation();
     if (!busy) onCancel();
   };
+  const title = isBudgetMode ? "New budget" : "New year";
+  const hint = isBudgetMode
+    ? "Name your budget and mimo will create a new file in your default folder, scaffolded with January through December for the current year. You can rename or delete it later."
+    : "January through December will be created automatically. You can rename or delete the year later.";
+  const fieldLabel = isBudgetMode ? "Budget name" : "Year";
+  const placeholder = isBudgetMode ? "e.g. Family 2026" : "e.g. 2026";
   return (
     <div
       className="modal-backdrop"
@@ -3356,24 +3478,21 @@ function CreateYearModal({
         noValidate
       >
         <h2 id="new-year-title" className="modal-title">
-          New year
+          {title}
         </h2>
-        <p className="modal-hint">
-          January through December will be created automatically. You can
-          rename or delete the year later.
-        </p>
+        <p className="modal-hint">{hint}</p>
         <div className="modal-fields">
           <label className="modal-field">
-            <span className="label">Year</span>
+            <span className="label">{fieldLabel}</span>
             <input
               className="input"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               onBlur={() => setTouched(true)}
               autoFocus
-              placeholder="e.g. 2026"
-              maxLength={4}
-              inputMode="numeric"
+              placeholder={placeholder}
+              maxLength={isBudgetMode ? 64 : 4}
+              inputMode={isBudgetMode ? "text" : "numeric"}
             />
           </label>
           {touched && error && <p className="modal-error">{error}</p>}
@@ -3564,6 +3683,247 @@ function DeleteYearConfirmModal({
             disabled={busy}
           >
             {busy ? "Deleting…" : "Delete year"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RenameWorkspaceModal({
+  open,
+  initial,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  open: boolean;
+  initial: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (name: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setValue(initial);
+      setTouched(false);
+    }
+  }, [open, initial]);
+  useModalEscape(open && !busy, onCancel);
+  if (!open) return null;
+  const trimmed = value.trim();
+  // Mirror the backend validation in settings.rs::sanitize_basename so
+  // the user gets immediate feedback instead of a round-trip error.
+  const error = !trimmed
+    ? "Enter a budget name."
+    : trimmed.length > 120
+    ? "Name is too long (max 120 characters)."
+    : /[\\/]/.test(trimmed)
+    ? "Name cannot contain slashes."
+    : trimmed.startsWith(".")
+    ? "Name cannot start with a dot."
+    : null;
+  const submit = () => {
+    if (error) {
+      setTouched(true);
+      return;
+    }
+    if (trimmed === initial) {
+      onCancel();
+      return;
+    }
+    onSubmit(trimmed);
+  };
+  const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <form
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-workspace-title"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        noValidate
+      >
+        <h2 id="rename-workspace-title" className="modal-title">
+          Rename budget
+        </h2>
+        <p className="modal-hint">
+          Renames the file on disk. The <code>.mimo</code> extension is
+          kept automatically.
+        </p>
+        <div className="modal-fields">
+          <label className="modal-field">
+            <span className="label">Budget name</span>
+            <input
+              className="input"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onBlur={() => setTouched(true)}
+              autoFocus
+              maxLength={120}
+              spellCheck={false}
+            />
+          </label>
+          {touched && error && <p className="modal-error">{error}</p>}
+        </div>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={handleCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="btn primary" disabled={busy || !!error}>
+            {busy ? "Saving…" : "Rename"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function DeleteWorkspaceConfirmModal({
+  open,
+  workspaceName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  workspaceName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useModalEscape(open && !busy, onCancel);
+  if (!open) return null;
+  const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!busy) onCancel();
+  };
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={busy ? undefined : onCancel}
+    >
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="del-workspace-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="del-workspace-title" className="modal-title">
+          Delete {workspaceName}?
+        </h2>
+        <p className="modal-hint">
+          The file is removed from disk along with every year, month, and
+          transaction it contains. This can't be undone here, but a recent
+          autosave or cloud history may still hold a copy.
+        </p>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={handleCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn danger"
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? "Deleting…" : "Delete budget"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Tiny three-button picker we surface when the user clicks a tile in
+ * the library *while another budget is already open*. The default
+ * behaviour (always-open-in-new-window) was confusing for "I just want
+ * to switch what I'm looking at", so we ask. From a launcher view the
+ * answer is always "this window" and we skip the prompt entirely.
+ */
+function OpenInWindowModal({
+  open,
+  fileName,
+  onCancel,
+  onPick,
+}: {
+  open: boolean;
+  fileName: string;
+  onCancel: () => void;
+  onPick: (where: "current" | "new") => void;
+}) {
+  useModalEscape(open, onCancel);
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="open-where-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="open-where-title" className="modal-title">
+          Open {fileName}
+        </h2>
+        <p className="modal-hint">
+          You already have a budget open. Pick where this one should
+          land — opening here will close the current budget (with an
+          unsaved-changes prompt if needed).
+        </p>
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onMouseDown={preventFocusSteal}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => onPick("current")}
+          >
+            This window
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => onPick("new")}
+          >
+            New window
           </button>
         </div>
       </div>
@@ -3996,7 +4356,6 @@ function MonthBudgetView({
             <tr>
               <th>Line</th>
               <th className="num">Planned</th>
-              <th className="num">Rollover in</th>
               <th className="num">Actual</th>
               <th className="num">Difference</th>
               <th />
@@ -4044,7 +4403,6 @@ function MonthBudgetView({
               <tr>
                 <th>Line</th>
                 <th className="num">Planned</th>
-                <th className="num">Rollover in</th>
                 <th className="num">Actual</th>
                 <th className="num">Variance</th>
                 <th />
@@ -4099,6 +4457,7 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [createYearOpen, setCreateYearOpen] = useState(false);
+  const [createYearMode, setCreateYearMode] = useState<"budget" | "year">("year");
   const [createYearBusy, setCreateYearBusy] = useState(false);
   const [renameYearTarget, setRenameYearTarget] = useState<YearRow | null>(null);
   const [renameYearBusy, setRenameYearBusy] = useState(false);
@@ -4107,6 +4466,19 @@ export default function App() {
   const [duplicateYearTarget, setDuplicateYearTarget] = useState<YearRow | null>(null);
   const [duplicateYearBusy, setDuplicateYearBusy] = useState(false);
   const [duplicateYearMonths, setDuplicateYearMonths] = useState<MonthRow[]>([]);
+  const [renameWorkspaceTarget, setRenameWorkspaceTarget] = useState<LibraryEntry | null>(
+    null,
+  );
+  const [renameWorkspaceBusy, setRenameWorkspaceBusy] = useState(false);
+  const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<LibraryEntry | null>(
+    null,
+  );
+  const [deleteWorkspaceBusy, setDeleteWorkspaceBusy] = useState(false);
+  // When the user picks a tile in the library while a real budget is
+  // already open, we ask whether to take over this window or open the
+  // tile in a new one. `null` = no prompt; otherwise it carries the
+  // pending file path so the choice handler knows what to launch.
+  const [libraryOpenChoice, setLibraryOpenChoice] = useState<{ path: string } | null>(null);
   const [isDefaultWorkspace, setIsDefaultWorkspace] = useState(true);
   const [workspaceMeta, setWorkspaceMeta] = useState<WorkspaceMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -4158,6 +4530,13 @@ export default function App() {
   const [reportsInitial, setReportsInitial] = useState<ReportsViewSeed | null>(null);
   const [crossYear, setCrossYear] = useState<CrossYearOverview | null>(null);
   const [crossYearLoading, setCrossYearLoading] = useState(false);
+
+  // Launcher views are the home screen and the library browser. They
+  // exist outside of any specific budget — no DB connection, no
+  // dirty-tracking, no autosave, no save pill, no in-budget chrome.
+  // Computed eagerly so effects below can depend on it without
+  // forward-references.
+  const isLauncherView = view.kind === "welcome" || view.kind === "library";
 
   const monthsRef = useRef<MonthRow[]>([]);
   const viewRef = useRef<AppView>(view);
@@ -4313,24 +4692,94 @@ export default function App() {
     }
   }, []);
 
+  // Library tile actions: keep the modal targets and the actual file IO
+  // separate so the tile click handler stays cheap and the workspace
+  // mutation only fires when the user confirms.
+  const onRequestRenameWorkspace = useCallback((entry: LibraryEntry) => {
+    setRenameWorkspaceTarget(entry);
+  }, []);
+
+  const onRequestDeleteWorkspace = useCallback((entry: LibraryEntry) => {
+    setDeleteWorkspaceTarget(entry);
+  }, []);
+
+  const onConfirmRenameWorkspace = useCallback(
+    async (newName: string) => {
+      if (!renameWorkspaceTarget) return;
+      setRenameWorkspaceBusy(true);
+      try {
+        await invoke<string>("rename_workspace_file", {
+          path: renameWorkspaceTarget.path,
+          newName,
+        });
+        setRenameWorkspaceTarget(null);
+        await rescanLibrary();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setRenameWorkspaceBusy(false);
+      }
+    },
+    [renameWorkspaceTarget, rescanLibrary],
+  );
+
+  const onConfirmDeleteWorkspace = useCallback(async () => {
+    if (!deleteWorkspaceTarget) return;
+    setDeleteWorkspaceBusy(true);
+    try {
+      await invoke("delete_workspace_file", { path: deleteWorkspaceTarget.path });
+      setDeleteWorkspaceTarget(null);
+      await rescanLibrary();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDeleteWorkspaceBusy(false);
+    }
+  }, [deleteWorkspaceTarget, rescanLibrary]);
+
   const bootstrap = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      // After the scratch elimination, the window starts with NO budget
+      // open. `get_database_path` returns "" and `is_default_workspace`
+      // returns true in that state. We treat both as "show home, run no
+      // data fetches".
       const path = await invoke<string>("get_database_path");
       setDbPath(path);
-      const isDefault = await invoke<boolean>("is_default_workspace");
-      setIsDefaultWorkspace(isDefault);
+      const hasBudget = await invoke<boolean>("has_open_budget");
+      setIsDefaultWorkspace(!hasBudget);
 
-      // Detect whether the active file is encrypted before issuing any
-      // schema queries. The backend opens lazily, so this avoids the
-      // first command throwing an "ENCRYPTED:" error mid-bootstrap.
       try {
         const supported = await invoke<boolean>("encryption_supported");
         setEncryptionAvailable(supported);
       } catch {
         // best effort
       }
+
+      // Always refresh the global settings + library so the home tiles
+      // (recent files, library card, default folder) are accurate.
+      void refreshSettings();
+      void refreshLibrary();
+
+      if (!hasBudget) {
+        // Fresh launcher state — no DB connection, no year list, no
+        // workspace meta, no autosave. The user gets the welcome
+        // screen and picks where to go from there.
+        setWorkspaceEncrypted(false);
+        setSidebarYearId(null);
+        setMonths([]);
+        setYears([]);
+        setYearOverview(null);
+        setWorkspaceMeta(null);
+        setAutoSaveOn(false);
+        setView({ kind: "welcome" });
+        return;
+      }
+
+      // Detect whether the active file is encrypted before issuing any
+      // schema queries. The backend opens lazily, so this avoids the
+      // first command throwing an "ENCRYPTED:" error mid-bootstrap.
       try {
         const enc = await invoke<boolean>("workspace_is_encrypted", { path });
         setWorkspaceEncrypted(enc);
@@ -4345,11 +4794,10 @@ export default function App() {
         // ENCRYPTED-error branch below on the first real command.
       }
 
-      const [initialYears, s] = await Promise.all([refreshYears(), refreshSettings()]);
+      const initialYears = await refreshYears();
       void refreshWorkspaceMeta();
       const autoSave = await invoke<boolean>("get_auto_save");
       setAutoSaveOn(autoSave);
-      void refreshLibrary();
 
       // Backfill: ensure every existing year has all 12 calendar months. This is
       // a one-shot reconcile that legacy files (pre-v3) will benefit from.
@@ -4366,18 +4814,19 @@ export default function App() {
       }
 
       if (yearList.length === 0) {
+        // A real `.mimo` file with zero years (rare — fresh blank file).
+        // Drop the user on the per-budget years-landing rather than
+        // bouncing to home, since they explicitly opened this file.
         setSidebarYearId(null);
         setMonths([]);
-        setView({ kind: "welcome" });
+        setView({ kind: "years-landing" });
       } else {
         const firstYear = yearList[0];
         setSidebarYearId(firstYear.id);
         await refreshMonths(firstYear.id);
         await refreshOverview(firstYear.id);
-        setView({ kind: "overview", yearId: firstYear.id });
+        setView({ kind: "year-overview", yearId: firstYear.id });
       }
-
-      void s;
     } catch (e) {
       setError(String(e));
     } finally {
@@ -4395,6 +4844,33 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  // Keep macOS's single global menu bar in sync with the focused
+  // window's context. In-budget items (Save As, Reports, Reorganize,
+  // Year Overview, etc.) get greyed when this window is on a launcher
+  // view so the user can't trigger commands against a budget that
+  // doesn't exist. We re-push on view changes AND on focus so a
+  // multi-window setup always reflects the foreground window.
+  useEffect(() => {
+    const sync = () => {
+      void invoke("set_menu_context", {
+        hasBudget: !isDefaultWorkspace,
+        onLibrary: view.kind === "library",
+      });
+    };
+    sync();
+    let unlisten: UnlistenFn | undefined;
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) sync();
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [isDefaultWorkspace, view.kind]);
 
   const activateMonth = useCallback(
     async (monthId: number) => {
@@ -4444,13 +4920,23 @@ export default function App() {
     try {
       const yid = sidebarYearIdRef.current;
       await refreshOverview(yid);
-      setView({ kind: "overview", yearId: yid });
+      // No active year ⇒ show the years-landing for this budget.
+      setView(yid != null ? { kind: "year-overview", yearId: yid } : { kind: "years-landing" });
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
   }, [refreshOverview]);
+
+  // Returns the user to the welcome screen (the "tiles" landing page they
+  // see on first launch). The sidebar is hidden while this view is active
+  // since none of its navigation applies until a workspace is opened.
+  const showHome = useCallback(() => {
+    setError(null);
+    setYtdDrawer(null);
+    setView({ kind: "welcome" });
+  }, []);
 
   const showLibrary = useCallback(async () => {
     setYtdDrawer(null);
@@ -4496,6 +4982,32 @@ export default function App() {
     await refreshCrossYear();
   }, [refreshCrossYear]);
 
+  // Launcher views (home + library) exist outside of any specific
+  // budget — picking a tile from there is "decide what to work on",
+  // not "spawn a second workspace". So opening from a launcher view
+  // always reuses the current window. From inside a real budget,
+  // opening another file always spawns a new window so the in-flight
+  // one isn't silently blown away. The unsaved-changes prompt fires
+  // automatically when reuse closes a dirty budget.
+  const shouldReuseCurrentWindow = useCallback(
+    () => viewRef.current.kind === "welcome" || viewRef.current.kind === "library",
+    [],
+  );
+
+  const openWorkspaceFromHome = useCallback(
+    async (filePath: string, opts?: { forceNewWindow?: boolean }) => {
+      const reuse = !opts?.forceNewWindow && shouldReuseCurrentWindow();
+      if (reuse) {
+        await invoke("open_budget_in_current_window", { filePath });
+        await bootstrap();
+      } else {
+        await invoke("open_budget_in_new_window", { filePath });
+      }
+      void refreshSettings();
+    },
+    [shouldReuseCurrentWindow, bootstrap, refreshSettings],
+  );
+
   const onOpenFile = useCallback(async () => {
     try {
       const defaultDir = settings?.defaultFolder ?? undefined;
@@ -4504,17 +5016,16 @@ export default function App() {
         directory: false,
         defaultPath: defaultDir,
         filters: [
-          { name: "mimo file", extensions: ["mimo", "budget", "sqlite3", "db"] },
+          { name: "mimo file", extensions: ["mimo"] },
         ],
       });
       const filePath = typeof picked === "string" ? picked : null;
       if (!filePath) return;
-      await invoke("open_budget_in_new_window", { filePath });
-      void refreshSettings();
+      await openWorkspaceFromHome(filePath);
     } catch (e) {
       setError(String(e));
     }
-  }, [settings, refreshSettings]);
+  }, [settings, openWorkspaceFromHome]);
 
   const onSaveAs = useCallback(async (): Promise<boolean> => {
     try {
@@ -4526,7 +5037,7 @@ export default function App() {
         defaultPath: defaultDir
           ? `${defaultDir}/${suggested}.mimo`
           : `${suggested}.mimo`,
-        filters: [{ name: "mimo file", extensions: ["mimo", "budget"] }],
+        filters: [{ name: "mimo file", extensions: ["mimo"] }],
       });
       if (!target) return false;
       await invoke("save_budget_as", { targetPath: target });
@@ -4569,7 +5080,7 @@ export default function App() {
           await invoke("encrypt_workspace", { password });
           setWorkspaceEncrypted(true);
           setPasswordModal(null);
-          showSaveToast("Workspace encrypted");
+          showSaveToast("Budget encrypted");
         } else if (passwordModal === "change") {
           await invoke("change_workspace_password", { newPassword: password });
           setPasswordModal(null);
@@ -4585,19 +5096,33 @@ export default function App() {
   );
 
   const onCmdS = useCallback(async () => {
+    // Cmd+S used to spring a Save As sheet whenever the active window
+    // had no real `.mimo` file behind it — but on the launcher screens
+    // that's confusing: there's nothing to save. After the scratch
+    // elimination, "no file" means "user is on home/library", so we
+    // short-circuit silently. For real budgets the file is always
+    // up-to-date because edits write through, so Cmd+S just confirms.
+    if (isLauncherView) return;
     try {
-      const isDefault = await invoke<boolean>("is_default_workspace");
-      if (isDefault) {
-        await onSaveAs();
-      } else {
-        showSaveToast("Already saved");
-      }
+      const hasBudget = await invoke<boolean>("has_open_budget");
+      if (!hasBudget) return;
+      showSaveToast("Already saved");
     } catch (e) {
       setError(String(e));
     }
-  }, [onSaveAs, showSaveToast]);
+  }, [isLauncherView, showSaveToast]);
 
+  // Two flavors of "create": from the home/library screens we open a New
+  // Budget wizard that produces a brand-new `.mimo` file; from inside an
+  // existing budget the same modal becomes a plain "+ New year" prompt
+  // that adds another calendar year. Mode is decided by the caller so each
+  // entry point reflects the user's actual intent.
+  const onCreateBudget = useCallback(() => {
+    setCreateYearMode("budget");
+    setCreateYearOpen(true);
+  }, []);
   const onCreateYear = useCallback(() => {
+    setCreateYearMode("year");
     setCreateYearOpen(true);
   }, []);
 
@@ -4610,7 +5135,7 @@ export default function App() {
         await refreshMonths(yearId);
         await refreshOverview(yearId);
         flushSync(() => {
-          setView({ kind: "overview", yearId });
+          setView({ kind: "year-overview", yearId });
         });
       } catch (e) {
         setError(String(e));
@@ -4626,24 +5151,53 @@ export default function App() {
     sidebarYearIdRef.current = null;
     setMonths([]);
     setYearOverview(null);
-    setView({ kind: "overview", yearId: null });
+    setView({ kind: "years-landing" });
   }, []);
 
   const onCreateYearSubmit = useCallback(
     async (label: string) => {
       setCreateYearBusy(true);
       try {
-        const newId = await invoke<number>("create_year", { yearLabel: label });
-        await refreshYears();
-        setCreateYearOpen(false);
-        await enterYear(newId);
+        if (createYearMode === "budget") {
+          // Spawn a brand-new `.mimo` file in the default folder. Always
+          // scaffold the current calendar year so the new budget opens
+          // ready to enter data; users can add more years later via the
+          // sidebar's "+ New year" button.
+          const reuse = shouldReuseCurrentWindow();
+          const currentYear = new Date().getFullYear();
+          await invoke<string>("create_year_workspace", {
+            yearLabel: label,
+            scaffoldYearValue: currentYear,
+            reuseCurrentWindow: reuse,
+          });
+          setCreateYearOpen(false);
+          if (reuse) {
+            // Backend already swapped this window's connection over to
+            // the new file; rerun the bootstrap so all in-memory state
+            // (years, sidebar, view) reflects it.
+            await bootstrap();
+          }
+          void refreshSettings();
+        } else {
+          const newId = await invoke<number>("create_year", { yearLabel: label });
+          await refreshYears();
+          setCreateYearOpen(false);
+          await enterYear(newId);
+        }
       } catch (e) {
         setError(String(e));
       } finally {
         setCreateYearBusy(false);
       }
     },
-    [refreshYears, enterYear],
+    [
+      createYearMode,
+      refreshYears,
+      enterYear,
+      shouldReuseCurrentWindow,
+      bootstrap,
+      refreshSettings,
+    ],
   );
 
   const onRenameYearSubmit = useCallback(
@@ -4804,25 +5358,52 @@ export default function App() {
     }
   }, []);
 
-  const onOpenRecent = useCallback(async (path: string) => {
-    try {
-      await invoke("open_budget_in_new_window", { filePath: path });
-      void refreshSettings();
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [refreshSettings]);
-
-  const onLibraryOpen = useCallback(
+  const onOpenRecent = useCallback(
     async (path: string) => {
       try {
-        await invoke("open_budget_in_new_window", { filePath: path });
-        void refreshSettings();
+        await openWorkspaceFromHome(path);
       } catch (e) {
         setError(String(e));
       }
     },
-    [refreshSettings],
+    [openWorkspaceFromHome],
+  );
+
+  // When a library tile is picked from inside an active budget the
+  // user almost always wants the new file in a fresh window — the
+  // open one usually has work in progress. But sometimes they want to
+  // *replace* what they're looking at. Rather than guess, we ask. On
+  // the launcher view itself (no budget behind us) there's nothing to
+  // protect, so we skip the prompt and reuse silently.
+  const onLibraryOpen = useCallback(
+    async (path: string) => {
+      try {
+        if (shouldReuseCurrentWindow()) {
+          await openWorkspaceFromHome(path);
+        } else {
+          setLibraryOpenChoice({ path });
+        }
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [openWorkspaceFromHome, shouldReuseCurrentWindow],
+  );
+
+  const onLibraryOpenChoiceConfirm = useCallback(
+    async (mode: "current" | "new") => {
+      const target = libraryOpenChoice;
+      if (!target) return;
+      setLibraryOpenChoice(null);
+      try {
+        await openWorkspaceFromHome(target.path, {
+          forceNewWindow: mode === "new",
+        });
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [libraryOpenChoice, openWorkspaceFromHome],
   );
 
   useEffect(() => {
@@ -4916,7 +5497,7 @@ export default function App() {
     void listenSafe("menu:next-month", () => cycleMonth(1));
     void listenSafe("menu:prev-month", () => cycleMonth(-1));
     void listenSafe("menu:open-file", () => void onOpenFile());
-    void listenSafe("menu:new-year", () => onCreateYear());
+    void listenSafe("menu:new-year", () => onCreateBudget());
     void listenSafe("menu:save-as", () => void onSaveAs());
     void listenSafe("menu:toggle-autosave", () => void onToggleAutoSave());
     void listenSafe("menu:reorganize", () => openReorderModal());
@@ -4942,7 +5523,7 @@ export default function App() {
       }
       if (workspaceEncryptedRef.current) {
         setError(
-          "This workspace is already encrypted. Use Change Password to update it.",
+          "This budget is already encrypted. Use Change Password to update it.",
         );
         return;
       }
@@ -4956,7 +5537,7 @@ export default function App() {
       }
       if (!workspaceEncryptedRef.current) {
         setError(
-          "This workspace isn't encrypted yet. Use Set Password to add a password.",
+          "This budget isn't encrypted yet. Use Set Password to add a password.",
         );
         return;
       }
@@ -4967,13 +5548,13 @@ export default function App() {
       if (!encryptionAvailableRef.current || !workspaceEncryptedRef.current) {
         setError(
           encryptionAvailableRef.current
-            ? "This workspace isn't encrypted."
+            ? "This budget isn't encrypted."
             : "This build of mimo doesn't include encryption support.",
         );
         return;
       }
       const ok = window.confirm(
-        "Remove encryption from this workspace? The file will be readable without a password after this.",
+        "Remove encryption from this budget? The file will be readable without a password after this.",
       );
       if (!ok) return;
       void (async () => {
@@ -4993,7 +5574,7 @@ export default function App() {
   }, [
     cycleMonth,
     onOpenFile,
-    onCreateYear,
+    onCreateBudget,
     onSaveAs,
     onToggleAutoSave,
     openReorderModal,
@@ -5020,7 +5601,11 @@ export default function App() {
   }, [onCmdS]);
 
   useEffect(() => {
-    if (!autoSaveOn) return;
+    // Autosave snapshots only make sense for a real `.mimo` file.
+    // Skip entirely when the user is on home/library or has no
+    // budget open — otherwise we'd snapshot nothing into the
+    // backups folder every five minutes.
+    if (!autoSaveOn || isDefaultWorkspace) return;
     const intervalMs = 5 * 60 * 1000;
     const id = window.setInterval(() => {
       setSnapshotState((s) => ({ ...s, busy: true }));
@@ -5033,10 +5618,17 @@ export default function App() {
         });
     }, intervalMs);
     return () => window.clearInterval(id);
-  }, [autoSaveOn]);
+  }, [autoSaveOn, isDefaultWorkspace]);
 
-  // Lightweight dirty poller for the status pill.
+  // Lightweight dirty poller for the status pill. Only runs when a
+  // real budget is open AND the active view actually shows the pill —
+  // launcher views suppress it, so polling twice a second there is
+  // wasted IPC + wasted main-thread time.
   useEffect(() => {
+    if (isDefaultWorkspace || isLauncherView) {
+      setDirty(false);
+      return;
+    }
     let cancelled = false;
     const tick = async () => {
       try {
@@ -5054,7 +5646,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [dbPath]);
+  }, [dbPath, isDefaultWorkspace, isLauncherView]);
 
   // "Last saved" pill ticks every 30s so "2m ago" stays current.
   const [pillTick, setPillTick] = useState(0);
@@ -5213,7 +5805,7 @@ export default function App() {
   );
 
   const workspaceFilenameStem = useCallback(
-    () => (basenameNoExt(dbPath) || "budget").replace(/\s+/g, "_"),
+    () => (basenameNoExt(dbPath) || "mimo").replace(/\s+/g, "_"),
     [dbPath],
   );
 
@@ -5402,7 +5994,7 @@ export default function App() {
     );
   }
 
-  const fileBasename = basenameNoExt(dbPath) || "budget";
+  const fileBasename = basenameNoExt(dbPath) || "mimo";
   // Prefer the user-set display name from workspace_meta over the raw file
   // basename. This lets the user give a workspace a friendlier label (e.g.
   // "Family budget") without renaming the underlying file. If display_name is
@@ -5415,8 +6007,21 @@ export default function App() {
   const workspaceBasename = displayNameOverride ?? fileBasename;
   const yearLabels = years.map((y) => y.yearLabel);
 
+  // Hide the sidebar whenever the active view doesn't belong to a single
+  // budget. Welcome and Library are launcher screens that live "outside"
+  // any one budget, so sidebar navigation (year list, months, etc.) has
+  // nothing meaningful to point at and only adds visual noise. Once the
+  // user opens a budget — by picking a tile in Library, a recent file,
+  // creating a new one, etc. — the view transitions to a per-budget
+  // kind (years-landing / year-overview / month) and the sidebar
+  // reappears with that budget's context.
+  const sidebarHidden = isLauncherView;
+  const layoutClassName = `app-layout${
+    sidebarHidden ? " sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""
+  }`;
+
   return (
-    <div className={`app-layout${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+    <div className={layoutClassName}>
       <BucketReorderModal
         open={reorderModalOpen}
         buckets={monthView?.expenseBuckets ?? []}
@@ -5449,12 +6054,14 @@ export default function App() {
       <UnsavedChangesModal
         open={unsavedPromptOpen}
         busy={unsavedBusy}
+        mode="close"
         onSave={() => void onUnsavedSave()}
         onDiscard={() => void onUnsavedDiscard()}
         onCancel={onUnsavedCancel}
       />
       <CreateYearModal
         open={createYearOpen}
+        mode={createYearMode}
         defaultYear={new Date().getFullYear()}
         busy={createYearBusy}
         existingLabels={yearLabels}
@@ -5493,6 +6100,32 @@ export default function App() {
         }}
         onSubmit={(args) => void onDuplicateYearSubmit(args)}
       />
+      <RenameWorkspaceModal
+        open={renameWorkspaceTarget !== null}
+        initial={renameWorkspaceTarget ? basename(renameWorkspaceTarget.path) : ""}
+        busy={renameWorkspaceBusy}
+        onCancel={() => {
+          if (!renameWorkspaceBusy) setRenameWorkspaceTarget(null);
+        }}
+        onSubmit={(name) => void onConfirmRenameWorkspace(name)}
+      />
+      <DeleteWorkspaceConfirmModal
+        open={deleteWorkspaceTarget !== null}
+        workspaceName={
+          deleteWorkspaceTarget ? basename(deleteWorkspaceTarget.path) : ""
+        }
+        busy={deleteWorkspaceBusy}
+        onCancel={() => {
+          if (!deleteWorkspaceBusy) setDeleteWorkspaceTarget(null);
+        }}
+        onConfirm={() => void onConfirmDeleteWorkspace()}
+      />
+      <OpenInWindowModal
+        open={libraryOpenChoice !== null}
+        fileName={libraryOpenChoice ? basenameNoExt(libraryOpenChoice.path) : ""}
+        onCancel={() => setLibraryOpenChoice(null)}
+        onPick={(where) => void onLibraryOpenChoiceConfirm(where)}
+      />
       <ExpenseLineEditModal
         config={lineEditConfig}
         onCancel={() => setLineEditConfig(null)}
@@ -5508,33 +6141,35 @@ export default function App() {
         onConfirm={() => void confirmDelete()}
       />
 
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={onToggleSidebar}
-        workspaceTitle={isDefaultWorkspace ? "Untitled workspace" : workspaceBasename}
-        workspaceTitleIsPlaceholder={isDefaultWorkspace}
-        workspacePathTooltip={(() => {
-          const parts: string[] = [];
-          if (workspaceMeta?.updatedAt) {
-            parts.push(`Last edited ${formatRelative(workspaceMeta.updatedAt)}`);
-          }
-          if (dbPath) parts.push(dbPath);
-          const joined = parts.join("\n");
-          return joined.length > 0 ? joined : undefined;
-        })()}
-        years={years}
-        months={months}
-        view={view}
-        sidebarYearId={sidebarYearId}
-        onSelectYear={(id) => void enterYear(id)}
-        onBackToYears={exitYear}
-        onShowYearOverview={(id) => {
-          void enterYear(id);
-        }}
-        onShowCrossYear={() => void showCrossYear()}
-        onActivateMonth={(id) => void activateMonth(id)}
-        onCreateYear={onCreateYear}
-      />
+      {!sidebarHidden && (
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={onToggleSidebar}
+          workspaceTitle={isDefaultWorkspace ? "Untitled budget" : workspaceBasename}
+          workspaceTitleIsPlaceholder={isDefaultWorkspace}
+          workspacePathTooltip={(() => {
+            const parts: string[] = [];
+            if (workspaceMeta?.updatedAt) {
+              parts.push(`Last edited ${formatRelative(workspaceMeta.updatedAt)}`);
+            }
+            if (dbPath) parts.push(dbPath);
+            const joined = parts.join("\n");
+            return joined.length > 0 ? joined : undefined;
+          })()}
+          years={years}
+          months={months}
+          view={view}
+          sidebarYearId={sidebarYearId}
+          onSelectYear={(id) => void enterYear(id)}
+          onBackToYears={exitYear}
+          onShowYearOverview={(id) => {
+            void enterYear(id);
+          }}
+          onShowCrossYear={() => void showCrossYear()}
+          onActivateMonth={(id) => void activateMonth(id)}
+          onCreateYear={onCreateYear}
+        />
+      )}
 
       <div className="app-main">
         <header className="top-bar">
@@ -5547,36 +6182,52 @@ export default function App() {
           <button
             type="button"
             className="btn ghost"
-            onClick={() => void showOverview()}
-            title="Year overview"
+            onClick={showHome}
+            title="Home"
           >
-            Overview
+            Home
           </button>
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={() => void showReports()}
-            title="Calendar reports (⌘⇧R)"
-          >
-            Reports
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={() => void showLibrary()}
-            title="Browse all years"
-          >
-            Library
-          </button>
-          <SaveStatusPill
-            isDefaultWorkspace={isDefaultWorkspace}
-            dirty={dirty}
-            autoSaveOn={autoSaveOn}
-            snapshotBusy={snapshotState.busy}
-            lastSnapshotAt={snapshotState.lastAt}
-            onSaveAs={() => void onSaveAs()}
-          />
-          {saveToast && (
+          {/* Reports + Library both operate on the open budget. On
+              launcher views (home / library itself) they're suppressed
+              because either there's no budget context yet or the user
+              is already at the destination. The menu still exposes
+              both for keyboard-driven navigation. */}
+          {!isLauncherView && (
+            <>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => void showReports()}
+                title="Calendar reports (⌘⇧R)"
+              >
+                Reports
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => void showLibrary()}
+                title="Browse all budgets"
+              >
+                Library
+              </button>
+            </>
+          )}
+          {/* Save / autosave status only makes sense inside an open
+              budget. On launcher views there's nothing to save (the
+              scratch backend isn't user-visible there), so we suppress
+              the pill entirely instead of showing a confusing
+              "Unsaved · Save As…" affordance. */}
+          {!isLauncherView && (
+            <SaveStatusPill
+              isDefaultWorkspace={isDefaultWorkspace}
+              dirty={dirty}
+              autoSaveOn={autoSaveOn}
+              snapshotBusy={snapshotState.busy}
+              lastSnapshotAt={snapshotState.lastAt}
+              onSaveAs={() => void onSaveAs()}
+            />
+          )}
+          {saveToast && !isLauncherView && (
             <span className="saved-flash" role="status" aria-live="polite">
               {saveToast}
             </span>
@@ -5596,11 +6247,10 @@ export default function App() {
             <WelcomeScreen
               recentFiles={recentFiles}
               busy={busy}
-              onCreateYear={onCreateYear}
+              onCreateYear={onCreateBudget}
               onOpenFile={() => void onOpenFile()}
               onOpenRecent={(p) => void onOpenRecent(p)}
               onShowLibrary={() => void showLibrary()}
-              defaultFolder={settings?.defaultFolder ?? null}
               onRevealFolder={() => void onRevealFolder()}
             />
           )}
@@ -5612,12 +6262,14 @@ export default function App() {
               onOpen={(p) => void onLibraryOpen(p)}
               onRescan={() => void rescanLibrary()}
               onRevealFolder={() => void onRevealFolder()}
-              onCreateYear={onCreateYear}
+              onCreateYear={onCreateBudget}
               defaultFolder={settings?.defaultFolder ?? null}
+              onRenameWorkspace={onRequestRenameWorkspace}
+              onDeleteWorkspace={onRequestDeleteWorkspace}
             />
           )}
 
-          {view.kind === "overview" && sidebarYearId == null && years.length > 0 && (
+          {view.kind === "years-landing" && (
             <YearsLanding
               years={years}
               onSelectYear={(id) => void enterYear(id)}
@@ -5635,7 +6287,7 @@ export default function App() {
             />
           )}
 
-          {view.kind === "overview" && yearOverview && sidebarYearId != null && (
+          {view.kind === "year-overview" && yearOverview && sidebarYearId != null && (
             <>
               <div className="overview-toolbar">
                 <ExportPickerButton
@@ -5691,20 +6343,12 @@ export default function App() {
             </>
           )}
 
-          {view.kind === "overview" && !yearOverview && sidebarYearId == null && years.length === 0 && (
-            <WelcomeScreen
-              recentFiles={recentFiles}
-              busy={busy}
-              onCreateYear={onCreateYear}
-              onOpenFile={() => void onOpenFile()}
-              onOpenRecent={(p) => void onOpenRecent(p)}
-              onShowLibrary={() => void showLibrary()}
-              defaultFolder={settings?.defaultFolder ?? null}
-              onRevealFolder={() => void onRevealFolder()}
-            />
-          )}
+          {/* The pre-split `overview` kind also had a third branch that
+              rendered <WelcomeScreen /> on an empty workspace. With the
+              scratch DB gone, bootstrap routes empties to `welcome`
+              directly, so that fallback is unreachable and was removed. */}
 
-          {view.kind === "overview" && !yearOverview && sidebarYearId != null && (
+          {view.kind === "year-overview" && !yearOverview && (
             <p className="muted month-loading-banner">Loading overview…</p>
           )}
 
@@ -5838,26 +6482,14 @@ function IncomeLineBlock({
   onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
-  const [rollover, setRollover] = useState(centsToInputString(line.rolloverInCents));
   useEffect(() => {
     setPlanned(centsToInputString(line.plannedCents));
   }, [line.plannedCents]);
-  useEffect(() => {
-    setRollover(centsToInputString(line.rolloverInCents));
-  }, [line.rolloverInCents]);
 
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
     if (c === null) return;
     await invoke("set_income_line_planned", { id: line.id, plannedCents: c });
-    await onRefresh();
-  };
-
-  const saveRollover = async () => {
-    const c = parseMoneyToCents(rollover);
-    if (c === null) return;
-    if (c === line.rolloverInCents) return;
-    await invoke("set_income_line_rollover_in", { lineId: line.id, cents: c });
     await onRefresh();
   };
 
@@ -5870,13 +6502,6 @@ function IncomeLineBlock({
             value={planned}
             onChange={setPlanned}
             onBlur={() => void savePlanned()}
-          />
-        </td>
-        <td className="num">
-          <PlannedAmountInput
-            value={rollover}
-            onChange={setRollover}
-            onBlur={() => void saveRollover()}
           />
         </td>
         <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
@@ -5903,7 +6528,7 @@ function IncomeLineBlock({
       </tr>
       {expanded && (
         <tr className="detail-row">
-          <td colSpan={6}>
+          <td colSpan={5}>
             <IncomeEntriesPanel lineId={line.id} entries={line.entries} onDone={onRefresh} />
           </td>
         </tr>
@@ -6000,26 +6625,14 @@ function ExpenseLineBlock({
   onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
-  const [rollover, setRollover] = useState(centsToInputString(line.rolloverInCents));
   useEffect(() => {
     setPlanned(centsToInputString(line.plannedCents));
   }, [line.plannedCents]);
-  useEffect(() => {
-    setRollover(centsToInputString(line.rolloverInCents));
-  }, [line.rolloverInCents]);
 
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
     if (c === null) return;
     await invoke("set_expense_line_planned", { id: line.id, plannedCents: c });
-    await onRefresh();
-  };
-
-  const saveRollover = async () => {
-    const c = parseMoneyToCents(rollover);
-    if (c === null) return;
-    if (c === line.rolloverInCents) return;
-    await invoke("set_expense_line_rollover_in", { lineId: line.id, cents: c });
     await onRefresh();
   };
 
@@ -6047,13 +6660,6 @@ function ExpenseLineBlock({
             value={planned}
             onChange={setPlanned}
             onBlur={() => void savePlanned()}
-          />
-        </td>
-        <td className="num">
-          <PlannedAmountInput
-            value={rollover}
-            onChange={setRollover}
-            onBlur={() => void saveRollover()}
           />
         </td>
         <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
@@ -6093,7 +6699,7 @@ function ExpenseLineBlock({
       </tr>
       {expanded && (
         <tr className="detail-row">
-          <td colSpan={6}>
+          <td colSpan={5}>
             <TransactionsPanel lineId={line.id} txs={line.transactions} onDone={onRefresh} />
           </td>
         </tr>

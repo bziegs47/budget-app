@@ -103,21 +103,6 @@ fn line_actual_income(conn: &Connection, income_line_id: i64) -> Result<i64, Str
     Ok(v)
 }
 
-fn expense_line_end_balance(conn: &Connection, expense_line_id: i64) -> Result<i64, String> {
-    let row: (i64, i64, i64) = conn
-        .query_row(
-            "SELECT rollover_in_cents, planned_cents, is_neutral_transfer FROM expense_lines WHERE id = ?1",
-            [expense_line_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map_err(err)?;
-    if row.2 != 0 {
-        return Ok(0);
-    }
-    let actual = line_actual_expense(conn, expense_line_id)?;
-    Ok(row.0 + row.1 - actual)
-}
-
 fn compute_ytd(conn: &Connection, active_period_end: &str) -> Result<YtdTotals, String> {
     let pe = period::parse_iso(active_period_end)?;
     let y = pe.year();
@@ -244,7 +229,7 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
     let mut income_stmt = conn
         .prepare(
             r#"
-        SELECT id, line_identity, sort_order, name, planned_cents, rollover_in_cents
+        SELECT id, line_identity, sort_order, name, planned_cents
         FROM income_lines WHERE month_id = ?1 ORDER BY sort_order
         "#,
         )
@@ -257,15 +242,13 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
                 r.get::<_, i32>(2)?,
                 r.get::<_, String>(3)?,
                 r.get::<_, i64>(4)?,
-                r.get::<_, i64>(5)?,
             ))
         })
         .map_err(err)?;
 
     let mut income_lines: Vec<IncomeLineDto> = Vec::new();
     for row in income_rows {
-        let (id, line_identity, sort_order, name, planned_cents, rollover_in_cents) =
-            row.map_err(err)?;
+        let (id, line_identity, sort_order, name, planned_cents) = row.map_err(err)?;
         let actual_cents = line_actual_income(conn, id)?;
         let variance_cents = actual_cents - planned_cents;
 
@@ -294,7 +277,6 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
             name,
             sort_order,
             planned_cents,
-            rollover_in_cents,
             actual_cents,
             variance_cents,
             entries,
@@ -318,7 +300,7 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
         let mut ls = conn
             .prepare(
                 r#"
-            SELECT id, line_identity, sort_order, name, planned_cents, rollover_in_cents,
+            SELECT id, line_identity, sort_order, name, planned_cents,
                    is_neutral_transfer, is_sinking_fund, annual_estimate_cents, due_month_hint
             FROM expense_lines WHERE bucket_id = ?1 ORDER BY sort_order, id
             "#,
@@ -334,9 +316,8 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
                     r.get::<_, i64>(4)?,
                     r.get::<_, i64>(5)?,
                     r.get::<_, i64>(6)?,
-                    r.get::<_, i64>(7)?,
-                    r.get::<_, Option<i64>>(8)?,
-                    r.get::<_, Option<i32>>(9)?,
+                    r.get::<_, Option<i64>>(7)?,
+                    r.get::<_, Option<i32>>(8)?,
                 ))
             })
             .map_err(err)?;
@@ -349,7 +330,6 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
                 sort_order,
                 name,
                 planned_cents,
-                rollover_in_cents,
                 is_neutral,
                 is_sinking,
                 annual_estimate_cents,
@@ -385,7 +365,6 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
                 name,
                 sort_order,
                 planned_cents,
-                rollover_in_cents,
                 is_neutral_transfer: is_neutral != 0,
                 is_sinking_fund: is_sinking != 0,
                 annual_estimate_cents,
@@ -512,7 +491,7 @@ fn seed_month(conn: &mut Connection, month_id: i64) -> Result<(), String> {
     for (i, name) in income_seed.iter().enumerate() {
         let uid = Uuid::new_v4().to_string();
         tx.execute(
-            "INSERT INTO income_lines (month_id, line_identity, sort_order, name, planned_cents, rollover_in_cents) VALUES (?1,?2,?3,?4,0,0)",
+            "INSERT INTO income_lines (month_id, line_identity, sort_order, name, planned_cents) VALUES (?1,?2,?3,?4,0)",
             params![month_id, uid, i as i32, name],
         )
         .map_err(err)?;
@@ -608,9 +587,9 @@ fn seed_month(conn: &mut Connection, month_id: i64) -> Result<(), String> {
             let uid = Uuid::new_v4().to_string();
             tx.execute(
                 r#"INSERT INTO expense_lines (
-                    bucket_id, line_identity, sort_order, name, planned_cents, rollover_in_cents,
+                    bucket_id, line_identity, sort_order, name, planned_cents,
                     is_neutral_transfer, is_sinking_fund, annual_estimate_cents, due_month_hint
-                ) VALUES (?1,?2,?3,?4,0,0,?5,?6,?7,NULL)"#,
+                ) VALUES (?1,?2,?3,?4,0,?5,?6,?7,NULL)"#,
                 params![
                     bid,
                     uid,
@@ -647,32 +626,6 @@ pub fn set_expense_line_planned(conn: &Connection, id: i64, planned_cents: i64) 
     Ok(())
 }
 
-pub fn set_expense_line_rollover_in(
-    conn: &Connection,
-    id: i64,
-    cents: i64,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE expense_lines SET rollover_in_cents = ?1 WHERE id = ?2",
-        params![cents, id],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-pub fn set_income_line_rollover_in(
-    conn: &Connection,
-    id: i64,
-    cents: i64,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE income_lines SET rollover_in_cents = ?1 WHERE id = ?2",
-        params![cents, id],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
 pub fn add_expense_line(
     conn: &Connection,
     bucket_id: i64,
@@ -694,9 +647,9 @@ pub fn add_expense_line(
     let uid = Uuid::new_v4().to_string();
     conn.execute(
         r#"INSERT INTO expense_lines (
-            bucket_id, line_identity, sort_order, name, planned_cents, rollover_in_cents,
+            bucket_id, line_identity, sort_order, name, planned_cents,
             is_neutral_transfer, is_sinking_fund, annual_estimate_cents, due_month_hint
-        ) VALUES (?1, ?2, ?3, ?4, 0, 0, ?5, ?6, NULL, NULL)"#,
+        ) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, NULL, NULL)"#,
         params![
             bucket_id,
             uid,
@@ -1127,7 +1080,7 @@ pub fn rename_year(conn: &Connection, year_id: i64, year_label: &str) -> Result<
         .optional()
         .map_err(err)?;
     if conflict.is_some() {
-        return Err(format!("Year {label} already exists in this workspace."));
+        return Err(format!("Year {label} already exists in this budget."));
     }
     let sort_order: i32 = label.parse::<i32>().unwrap_or(0);
     let updated = conn
@@ -1252,7 +1205,7 @@ pub fn duplicate_year(
         .optional()
         .map_err(err)?;
     if already.is_some() {
-        return Err(format!("Year {dest_label} already exists in this workspace."));
+        return Err(format!("Year {dest_label} already exists in this budget."));
     }
 
     let source_label: String = conn
@@ -1363,7 +1316,7 @@ pub fn duplicate_year(
         };
         for (line_identity, sort_order, name, planned_cents) in income_rows {
             tx.execute(
-                "INSERT INTO income_lines (month_id, line_identity, sort_order, name, planned_cents, rollover_in_cents) VALUES (?1,?2,?3,?4,?5,0)",
+                "INSERT INTO income_lines (month_id, line_identity, sort_order, name, planned_cents) VALUES (?1,?2,?3,?4,?5)",
                 params![dest_id, line_identity, sort_order, name, planned_cents],
             )
             .map_err(err)?;
@@ -1443,9 +1396,9 @@ pub fn duplicate_year(
                 .ok_or_else(|| "Bucket mapping missing during duplicate_year".to_string())?;
             tx.execute(
                 r#"INSERT INTO expense_lines (
-                    bucket_id, line_identity, sort_order, name, planned_cents, rollover_in_cents,
+                    bucket_id, line_identity, sort_order, name, planned_cents,
                     is_neutral_transfer, is_sinking_fund, annual_estimate_cents, due_month_hint
-                ) VALUES (?1,?2,?3,?4,?5,0,?6,?7,?8,?9)"#,
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
                 params![
                     new_bid,
                     line_identity,
