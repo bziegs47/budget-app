@@ -1696,23 +1696,67 @@ function YearOverviewView({
   yearEndNudge: { sourceLabel: string; nextLabel: string } | null;
   onStartYearEndNudge: () => void;
 }) {
-  const totalRows: { label: string; planned: number; actual: number }[] = [
+  // Each card has its own three rows. Income and Expenses share the
+  // Planned / Actual / Difference shape, but the Net card is a
+  // different beast — it summarises the year by stacking actual
+  // income against actual expenses, with the surplus/deficit as the
+  // third row. We keep that intentionally inside the same totals grid
+  // so the visual rhythm is consistent (three cards × three rows).
+  type StatTone = "neutral" | "income-variance" | "expense-variance";
+  type StatRow = { label: string; value: number; tone: StatTone };
+  type TotalCard = { title: string; rows: StatRow[] };
+
+  const incomeActual = overview.incomeActualCents;
+  const expensesActual = overview.expenseNetActualCents;
+
+  const totalCards: TotalCard[] = [
     {
-      label: "Income",
-      planned: overview.incomePlannedCents,
-      actual: overview.incomeActualCents,
+      title: "Income",
+      rows: [
+        { label: "Planned", value: overview.incomePlannedCents, tone: "neutral" },
+        { label: "Actual", value: incomeActual, tone: "neutral" },
+        {
+          label: "Difference",
+          value: incomeActual - overview.incomePlannedCents,
+          tone: "income-variance",
+        },
+      ],
     },
     {
-      label: "Net expenses",
-      planned: overview.expenseNetPlannedCents,
-      actual: overview.expenseNetActualCents,
+      title: "Expenses",
+      rows: [
+        { label: "Planned", value: overview.expenseNetPlannedCents, tone: "neutral" },
+        { label: "Actual", value: expensesActual, tone: "neutral" },
+        {
+          label: "Difference",
+          // Under-spend is positive on an expense card, so we flip the
+          // sign convention here: planned - actual.
+          value: overview.expenseNetPlannedCents - expensesActual,
+          tone: "expense-variance",
+        },
+      ],
     },
     {
-      label: "Net",
-      planned: overview.netPlannedCents,
-      actual: overview.netActualCents,
+      title: "Net",
+      rows: [
+        { label: "Income", value: incomeActual, tone: "neutral" },
+        { label: "Expenses", value: expensesActual, tone: "neutral" },
+        {
+          label: "Difference",
+          // Surplus (income − expenses) reads the same way as an
+          // income variance: positive = good, negative = bad.
+          value: incomeActual - expensesActual,
+          tone: "income-variance",
+        },
+      ],
     },
   ];
+
+  const toneClass = (tone: StatTone, value: number): string => {
+    if (tone === "income-variance") return varianceClassIncome(value);
+    if (tone === "expense-variance") return varianceClassExpense(value);
+    return "";
+  };
 
   return (
     <div className="year-overview">
@@ -1739,37 +1783,18 @@ function YearOverviewView({
       <section className="card">
         <h2>Year totals</h2>
         <div className="overview-totals">
-          {totalRows.map((row) => (
-            <div className="overview-total-card" key={row.label}>
-              <div className="overview-total-label">{row.label}</div>
+          {totalCards.map((card) => (
+            <div className="overview-total-card" key={card.title}>
+              <div className="overview-total-label">{card.title}</div>
               <div className="overview-total-cols">
-                <div>
-                  <div className="mini-label">Planned</div>
-                  <div className="num">{formatUsd(row.planned, "rounded")}</div>
-                </div>
-                <div>
-                  <div className="mini-label">Actual</div>
-                  <div className="num">{formatUsd(row.actual, "rounded")}</div>
-                </div>
-                <div>
-                  <div className="mini-label">Difference</div>
-                  <div
-                    className={`num ${
-                      row.label === "Income"
-                        ? varianceClassIncome(row.actual - row.planned)
-                        : row.label === "Net expenses"
-                          ? varianceClassExpense(row.planned - row.actual)
-                          : varianceClassExpense(row.actual - row.planned)
-                    }`}
-                  >
-                    {formatUsd(
-                      row.label === "Net expenses"
-                        ? row.planned - row.actual
-                        : row.actual - row.planned,
-                      "rounded",
-                    )}
+                {card.rows.map((row) => (
+                  <div key={row.label}>
+                    <div className="mini-label">{row.label}</div>
+                    <div className={`num ${toneClass(row.tone, row.value)}`}>
+                      {formatUsd(row.value, "rounded")}
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
             </div>
           ))}
