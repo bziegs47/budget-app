@@ -6223,11 +6223,17 @@ export default function App() {
 
       <div className="app-main">
         <header className="top-bar">
-          <div className="brand" title={dbPath || undefined}>
+          <button
+            type="button"
+            className="brand brand-button"
+            onClick={showHome}
+            title="Go to home"
+            aria-label="mimo — go to home"
+          >
             <span className="brand-mark" aria-hidden="true">◆</span>
             <span className="brand-name">mimo</span>
             <span className="brand-tagline">Money In, Money Out — Mind the Flow</span>
-          </div>
+          </button>
           <div className="top-bar-spacer" />
           <button
             type="button"
