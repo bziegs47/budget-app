@@ -1,45 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-label="mimo">
   <title>mimo</title>
   <defs>
-    <linearGradient id="mimoFill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#34d399" stop-opacity="0.4" />
-      <stop offset="50%" stop-color="#10b981" stop-opacity="0.22" />
-      <stop offset="100%" stop-color="#047857" stop-opacity="0.06" />
+    <linearGradient id="ledgerBind" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#047857" />
+      <stop offset="100%" stop-color="#059669" />
     </linearGradient>
-    <linearGradient id="mimoLine" x1="0" y1="0" x2="1" y2="0">
+    <linearGradient id="ledgerRow" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#059669" />
       <stop offset="100%" stop-color="#34d399" />
     </linearGradient>
   </defs>
-  <path
-    d="M 36 148
-       C 68 148, 84 82, 118 82
-       C 148 82, 158 132, 184 108
-       C 198 96, 208 90, 220 98
-       L 220 178
-       L 36 178
-       Z"
-    fill="url(#mimoFill)"
-  />
-  <path
-    d="M 36 148
-       C 68 148, 84 82, 118 82
-       C 148 82, 158 132, 184 108
-       C 198 96, 208 90, 220 98"
-    fill="none"
-    stroke="url(#mimoLine)"
-    stroke-width="5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-  <line
-    x1="32"
-    y1="178"
-    x2="224"
-    y2="178"
-    stroke="#6ee7b7"
-    stroke-width="3"
-    stroke-linecap="round"
-    opacity="0.5"
-  />
+  <rect x="46" y="68" width="22" height="120" rx="11" fill="url(#ledgerBind)" />
+  <rect x="82" y="86" width="118" height="20" rx="10" fill="url(#ledgerRow)" opacity="0.95" />
+  <rect x="82" y="118" width="156" height="20" rx="10" fill="url(#ledgerRow)" opacity="0.78" />
+  <rect x="82" y="150" width="88" height="20" rx="10" fill="url(#ledgerRow)" opacity="0.58" />
 </svg>
