@@ -6232,7 +6232,7 @@ export default function App() {
           >
             <span className="brand-mark" aria-hidden="true">◆</span>
             <span className="brand-name">mimo</span>
-            <span className="brand-tagline">Money In, Money Out — Mind the Flow</span>
+            <span className="brand-tagline">Money In, Money Out | Mind the Flow</span>
           </button>
           <div className="top-bar-spacer" />
           <button
