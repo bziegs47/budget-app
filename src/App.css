@@ -833,6 +833,47 @@ body {
   transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
 }
 
+/* Income + expense bucket tables on the monthly budget screen.
+   The default `data-table` lets columns auto-size to their content,
+   which made the planned input gobble half the row while
+   actual/difference values squished against the right edge. We pin
+   each money column to a fixed width and let the leading "Line"
+   column take the leftover, so headers and values share one
+   right-edge per column and the row reads as a clean grid. */
+.budget-line-table {
+  table-layout: fixed;
+}
+
+.budget-line-table .col-money {
+  width: 7.5rem;
+}
+
+.budget-line-table .col-actions {
+  width: 5.5rem;
+}
+
+/* Inside the table, make the planned-amount input fill its column
+   evenly so its right edge aligns with the actual / difference
+   numbers above and below. */
+.budget-line-table .currency-field {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.budget-line-table .currency-field .input-money {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+/* The line name in column 1 can be long ("Interest & dividends",
+   "Rent / mortgage"); allow it to wrap rather than blow up the row. */
+.budget-line-table td:first-child {
+  overflow-wrap: anywhere;
+}
+
 .bucket-header {
   display: flex;
   align-items: center;

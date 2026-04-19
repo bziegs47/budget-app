@@ -4387,7 +4387,14 @@ function MonthBudgetView({
 
       <section className="card">
         <h2>Income</h2>
-        <table className="data-table">
+        <table className="data-table budget-line-table">
+          <colgroup>
+            <col />
+            <col className="col-money" />
+            <col className="col-money" />
+            <col className="col-money" />
+            <col className="col-actions" />
+          </colgroup>
           <thead>
             <tr>
               <th>Line</th>
@@ -4434,7 +4441,14 @@ function MonthBudgetView({
           <div className="bucket-header">
             <h2>{bucket.name}</h2>
           </div>
-          <table className="data-table">
+          <table className="data-table budget-line-table">
+            <colgroup>
+              <col />
+              <col className="col-money" />
+              <col className="col-money" />
+              <col className="col-money" />
+              <col className="col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Line</th>
