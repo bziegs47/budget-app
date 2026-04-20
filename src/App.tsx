@@ -1361,9 +1361,9 @@ function WelcomeScreen({
                   type="button"
                   className="recent-item"
                   onClick={() => onOpenRecent(r.path)}
+                  title={r.path}
                 >
                   <span className="recent-name">{basename(r.path) || r.yearLabel}</span>
-                  <span className="recent-path muted">{r.path}</span>
                 </button>
               </li>
             ))}
