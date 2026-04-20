@@ -798,23 +798,30 @@ body {
 }
 
 .modal-hint {
-  margin: 0;
+  /* Bottom gap so the hint sits as its own paragraph instead of
+     pressing up against the first field's label - the old flush
+     stacking made label + hint read as one block of muted text. */
+  margin: 0 0 1rem;
   font-size: 0.78rem;
   color: var(--muted);
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
 .modal-field {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.4rem;
 }
 
 .modal-field > .label {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  /* Sentence case + text colour + a bit more weight gives the label
+     real identity instead of looking like a continuation of the
+     muted hint above it. */
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text);
+  text-transform: none;
 }
 
 /* Inline validation message — kept small so it never looks like a second

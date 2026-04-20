@@ -3613,8 +3613,8 @@ function CreateYearModal({
   };
   const title = isBudgetMode ? "New budget" : "New year";
   const hint = isBudgetMode
-    ? "Name your budget and mimo will create a new file in your default folder, scaffolded with January through December for the current year. You can rename or delete it later."
-    : "January through December will be created automatically. You can rename or delete the year later.";
+    ? "A new file in your default folder, scaffolded with January through December."
+    : "January through December are added automatically.";
   const fieldLabel = isBudgetMode ? "Budget name" : "Year";
   const placeholder = isBudgetMode ? "e.g. Household budget" : "e.g. 2026";
   return (
