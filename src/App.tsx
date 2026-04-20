@@ -267,7 +267,7 @@ function SaveStatusPill({
   }
   if (snapshotBusy) {
     return (
-      <span className="status-pill">
+      <span className="status-pill" title="Writing snapshot…">
         <span className="status-dot busy" /> Auto-saving…
       </span>
     );
@@ -434,8 +434,8 @@ function PopoverCalendar({
           type="button"
           className="cal-nav"
           onClick={goPrev}
-          aria-label="Previous month"
           title="Previous month"
+          aria-label="Previous month"
         >
           ‹
         </button>
@@ -444,8 +444,8 @@ function PopoverCalendar({
           type="button"
           className="cal-nav"
           onClick={goNext}
-          aria-label="Next month"
           title="Next month"
+          aria-label="Next month"
         >
           ›
         </button>
@@ -1172,6 +1172,7 @@ function Sidebar({
                   type="button"
                   className="sidebar-month-main"
                   onClick={onShowCrossYear}
+                  title="Compare all years in this budget"
                 >
                   <span className="sidebar-month-label">
                     All years in this budget
@@ -1362,7 +1363,6 @@ function WelcomeScreen({
                   type="button"
                   className="recent-item"
                   onClick={() => onOpenRecent(r.path)}
-                  title={r.path}
                 >
                   <span className="recent-name">{basename(r.path) || r.yearLabel}</span>
                 </button>
@@ -1603,7 +1603,10 @@ function LibraryView({
                     <div className="library-row-title">
                       <span className="library-row-name">{name}</span>
                       {e.provider && (
-                        <span className="library-card-badge provider">
+                        <span
+                          className="library-card-badge provider"
+                          title={`Stored in ${e.provider}`}
+                        >
                           {e.provider}
                         </span>
                       )}
@@ -1952,12 +1955,13 @@ function CrossYearView({
             const expenseDelta = c.expensePlannedCents - c.expenseActualCents;
             const netDelta = c.netActualCents - c.netPlannedCents;
             return (
-                <button
-                  type="button"
-                  key={c.yearId}
-                  className="cross-year-total-card"
-                  onClick={() => onJumpToYear(c.yearId)}
-                >
+              <button
+                type="button"
+                key={c.yearId}
+                className="cross-year-total-card"
+                onClick={() => onJumpToYear(c.yearId)}
+                title="Open year overview"
+              >
                 <div className="cross-year-total-head">
                   <span className="cross-year-total-label">{c.yearLabel}</span>
                   <span className="cross-year-total-meta">
@@ -2221,13 +2225,7 @@ function YtdSlideOver({
               date
             </p>
           </div>
-          <button
-            type="button"
-            className="btn ghost drawer-close"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close"
-          >
+          <button type="button" className="btn ghost drawer-close" onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
@@ -2726,7 +2724,7 @@ function ExpenseLineEditModal({
               </span>
             </span>
           </label>
-        </div>
+      </div>
         <div className="modal-actions">
           <button
             type="button"
@@ -2941,7 +2939,7 @@ function PasswordModal({
             <span className="label">
               {kind === "change" ? "New password" : "Password"}
             </span>
-            <input
+        <input
               type="password"
               className="input"
               value={pw}
@@ -3170,7 +3168,6 @@ function PreferencesModal({
             className="btn ghost preferences-close"
             onClick={onClose}
             aria-label="Close preferences"
-            title="Close preferences"
           >
             ✕
           </button>
@@ -6278,7 +6275,11 @@ export default function App() {
             <span className="brand-tagline">Money In, Money Out | Mind the Flow</span>
           </button>
           <div className="top-bar-spacer" />
-          <button type="button" className="btn ghost" onClick={showHome}>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={showHome}
+          >
             Home
           </button>
           {/* Reports + Library both operate on the open budget. On
@@ -6497,7 +6498,7 @@ export default function App() {
           {view.kind === "month" && (!monthView || monthView.monthId !== view.monthId) && (
             <p className="muted month-loading-banner">Loading month…</p>
           )}
-        </main>
+    </main>
       </div>
 
       <YtdSlideOver
@@ -6751,7 +6752,14 @@ function ExpenseLineBlock({
               tracking
             </span>
           )}
-          {line.isSinkingFund && <span className="pill soft">sinking</span>}
+          {line.isSinkingFund && (
+            <span
+              className="pill soft"
+              title="Sinking fund — recurring savings toward a planned future expense"
+            >
+              sinking
+            </span>
+          )}
         </td>
         <td className="num">
           <PlannedAmountInput
