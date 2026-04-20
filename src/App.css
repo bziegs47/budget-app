@@ -1754,8 +1754,8 @@ body {
   background: linear-gradient(
     to right,
     var(--border) 0%,
-    var(--border) 35%,
-    transparent 100%
+    var(--border) 10%,
+    transparent 40%
   );
   pointer-events: none;
 }
