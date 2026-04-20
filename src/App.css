@@ -1546,38 +1546,81 @@ body {
   font-size: 1rem;
 }
 
+/* Mirrors `.library-list` so the welcome screen and library use the
+   same Finder-style row visuals. The recent list fades a touch faster
+   (transparent by ~25% across) since the rows are shorter and the
+   right side is mostly empty. */
 .recent-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
 }
 
 .recent-item {
+  position: relative;
   display: flex;
   flex-direction: column;
+  width: 100%;
   text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.55rem 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.65rem 0.95rem;
   cursor: pointer;
+  transition: background-color 0.12s ease;
   font: inherit;
   color: var(--text);
 }
 
-.recent-item:hover {
-  border-color: var(--accent);
+.recent-item::before,
+.recent-list li:last-child .recent-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    var(--border) 0%,
+    var(--border) 8%,
+    transparent 25%
+  );
+  pointer-events: none;
+}
+
+.recent-item::before {
+  top: 0;
+}
+
+.recent-list li:last-child .recent-item::after {
+  bottom: 0;
+}
+
+.recent-item:hover,
+.recent-item:focus-visible {
+  background: linear-gradient(
+    to right,
+    var(--surface-2) 0%,
+    var(--surface-2) 50%,
+    transparent 100%
+  );
+  outline: none;
+}
+
+.recent-item:focus-visible {
+  box-shadow: inset 2px 0 0 0
+    color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .recent-name {
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 650;
+  word-break: break-word;
 }
 
 .recent-path {
   font-size: 0.72rem;
+  margin-top: 0.15rem;
   word-break: break-all;
 }
 
