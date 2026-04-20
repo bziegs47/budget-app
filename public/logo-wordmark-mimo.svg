@@ -20,7 +20,7 @@
     mimo
   </text>
   <path
-    d="M 108 78 Q 180 80.2 252 78"
+    d="M 104 77.5 C 148 79, 202 80.7 252 78.15"
     stroke="#6ee7b7"
     stroke-width="2.5"
     stroke-linecap="round"
