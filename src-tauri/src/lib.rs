@@ -720,6 +720,57 @@ fn open_budget_in_current_window(
     Ok(())
 }
 
+/// Copies an external `.mimo` file into the user's default folder so it
+/// shows up in the library and survives across sessions. Used by the
+/// "Import" button on the library page when a user brings a file from
+/// another machine (e.g. via Google Drive). The original file at
+/// `source_path` is left untouched. Returns the absolute path of the
+/// imported copy so the caller can immediately open it.
+#[tauri::command]
+fn import_workspace(
+    app_handle: tauri::AppHandle,
+    source_path: String,
+) -> Result<String, String> {
+    let src = PathBuf::from(&source_path);
+    if !src.exists() {
+        return Err(format!("File not found: {}", src.display()));
+    }
+    let extension_ok = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.eq_ignore_ascii_case("mimo"))
+        .unwrap_or(false);
+    if !extension_ok {
+        return Err("Only .mimo files can be imported.".to_string());
+    }
+
+    let folder = settings::ensure_default_folder(&app_handle)?;
+
+    let stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("imported")
+        .to_string();
+
+    // If a file by that name already lives in the default folder we
+    // suffix " (1)", " (2)", … so the import never silently overwrites
+    // an existing budget. Same convention macOS uses for Finder copies.
+    let mut dest = folder.join(format!("{stem}.mimo"));
+    let mut counter = 1;
+    while dest.exists() {
+        dest = folder.join(format!("{stem} ({counter}).mimo"));
+        counter += 1;
+        if counter > 999 {
+            return Err("Too many name conflicts in default folder.".to_string());
+        }
+    }
+
+    std::fs::copy(&src, &dest)
+        .map_err(|e| format!("Could not copy file into library: {e}"))?;
+    let _ = settings::refresh_library_entry(&app_handle, &dest);
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn save_snapshot(
     state: tauri::State<AppState>,
@@ -1583,6 +1634,7 @@ pub fn run() {
             mark_clean,
             open_budget_in_new_window,
             open_budget_in_current_window,
+            import_workspace,
             save_snapshot,
             get_auto_save,
             set_auto_save,

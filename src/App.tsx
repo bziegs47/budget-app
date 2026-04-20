@@ -1487,6 +1487,7 @@ function LibraryView({
   onRescan,
   onOpen,
   onOpenInNewWindow,
+  onImport,
   onCreateYear,
   onRevealFolder,
   onRenameWorkspace,
@@ -1498,6 +1499,7 @@ function LibraryView({
   onRescan: () => void;
   onOpen: (path: string) => void;
   onOpenInNewWindow: (path: string) => void;
+  onImport: () => void;
   onCreateYear: () => void;
   onRevealFolder: () => void;
   onRenameWorkspace: (entry: LibraryEntry) => void;
@@ -1523,16 +1525,30 @@ function LibraryView({
       <header className="library-header">
         <div>
           <h1>Budget library</h1>
-          <p className="muted">
+          {/* Source-folder line doubles as a quiet rescan affordance.
+              The library auto-rescans on entry, so the button is only
+              needed when the user adds a file via Finder while staying
+              on this page — keeping it inline keeps it discoverable
+              without competing with the primary actions on the right. */}
+          <p className="muted library-source">
             From <code>{defaultFolder ?? "~/Documents/Budget"}</code>
+            <button
+              type="button"
+              className="btn-link library-rescan"
+              onClick={onRescan}
+              disabled={busy}
+              title="Re-read the default folder for changes"
+            >
+              {busy ? "Scanning…" : "Rescan"}
+            </button>
           </p>
         </div>
         <div className="library-actions">
           <button type="button" className="btn secondary" onClick={onRevealFolder}>
             Show in Finder
           </button>
-          <button type="button" className="btn secondary" onClick={onRescan} disabled={busy}>
-            {busy ? "Scanning…" : "Rescan"}
+          <button type="button" className="btn secondary" onClick={onImport}>
+            Import…
           </button>
           <button type="button" className="btn primary" onClick={onCreateYear}>
             <PlusIcon /> New budget
@@ -5448,6 +5464,31 @@ export default function App() {
   // *replace* what they're looking at. Rather than guess, we ask. On
   // the launcher view itself (no budget behind us) there's nothing to
   // protect, so we skip the prompt and reuse silently.
+  // Bring an external `.mimo` file into the user's library: copy it
+  // into the default folder (with " (1)", " (2)", … name de-duping if
+  // a file by that name is already there), then open the new copy in
+  // the current window. The original file is left untouched, so the
+  // source can stay in Google Drive / Downloads / wherever without
+  // being double-managed by the app.
+  const onImportToLibrary = useCallback(async () => {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "mimo file", extensions: ["mimo"] }],
+      });
+      const sourcePath = typeof picked === "string" ? picked : null;
+      if (!sourcePath) return;
+      const importedPath = await invoke<string>("import_workspace", {
+        sourcePath,
+      });
+      await rescanLibrary();
+      await openWorkspaceFromHome(importedPath);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [openWorkspaceFromHome, rescanLibrary]);
+
   const onLibraryOpen = useCallback(
     async (path: string) => {
       try {
@@ -6342,6 +6383,7 @@ export default function App() {
               onOpenInNewWindow={(p) =>
                 void openWorkspaceFromHome(p, { forceNewWindow: true })
               }
+              onImport={() => void onImportToLibrary()}
               onRescan={() => void rescanLibrary()}
               onRevealFolder={() => void onRevealFolder()}
               onCreateYear={onCreateBudget}

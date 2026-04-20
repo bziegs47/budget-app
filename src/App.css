@@ -1680,6 +1680,29 @@ body {
   flex-wrap: wrap;
 }
 
+/* "From /path/to/folder" line, with the rescan link tucked in beside
+   the path so it reads as a quiet refresh affordance instead of a
+   primary toolbar button. */
+.library-source {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.library-rescan {
+  /* Inherit btn-link styling but tighten the typography so it sits
+     visually on the source-folder line rather than competing with it. */
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.library-rescan:disabled {
+  color: var(--muted);
+  cursor: progress;
+}
+
 .library-empty {
   padding: 2rem 1rem;
   text-align: center;
