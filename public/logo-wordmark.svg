@@ -19,11 +19,13 @@
   >
     mimo
   </text>
+  <!-- Organic wave: uneven peaks/valleys (hand-drawn rhythm, not a sine wave) -->
   <path
-    d="M 104 77.5 C 148 79, 202 80.7 252 78.15"
+    d="M 102 77.7 C 118 80.5 128 79.6 138 78.3 C 150 76.9 162 79.4 174 80.6 C 186 81.4 198 79.9 210 78.1 C 222 76.5 236 77.85 251 78.45"
     stroke="#6ee7b7"
     stroke-width="2.5"
     stroke-linecap="round"
+    stroke-linejoin="round"
     fill="none"
     opacity="0.55"
   />
