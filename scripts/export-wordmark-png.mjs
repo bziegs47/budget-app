@@ -25,6 +25,16 @@ const jobs = [
     out: join(root, "public", "logo-wordmark-on-dark.png"),
     width: 1440,
   },
+  {
+    svg: join(root, "public", "logo-wordmark-mimo.svg"),
+    out: join(root, "public", "logo-wordmark-mimo.png"),
+    width: 1440,
+  },
+  {
+    svg: join(root, "public", "logo-wordmark-mimo-on-dark.svg"),
+    out: join(root, "public", "logo-wordmark-mimo-on-dark.png"),
+    width: 1440,
+  },
 ];
 
 for (const { svg, out, width } of jobs) {
