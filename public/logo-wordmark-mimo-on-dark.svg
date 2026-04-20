@@ -13,11 +13,14 @@
     text-anchor="middle"
     fill="url(#mwmd)"
     font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-    font-size="50"
     font-weight="600"
     letter-spacing="8"
+    dominant-baseline="alphabetic"
   >
-    MiMo
+    <tspan font-size="50">M</tspan>
+    <tspan font-size="38">i</tspan>
+    <tspan font-size="50">M</tspan>
+    <tspan font-size="38">o</tspan>
   </text>
   <line
     x1="44"
