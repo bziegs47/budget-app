@@ -19,14 +19,12 @@
   >
     mimo
   </text>
-  <line
-    x1="44"
-    y1="78"
-    x2="316"
-    y2="78"
+  <path
+    d="M 108 78 Q 180 80.2 252 78"
     stroke="#047857"
     stroke-width="2.5"
     stroke-linecap="round"
+    fill="none"
     opacity="0.55"
   />
 </svg>
