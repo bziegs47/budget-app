@@ -4654,19 +4654,14 @@ export default function App() {
     };
   }, [ytdDrawer]);
 
-  // Keep the OS window title in sync with whatever label we're currently
-  // showing in the sidebar workspace chip (display name override or file
-  // basename). Rust sets a reasonable initial title at window creation; this
-  // effect handles the runtime changes (display_name edits, file rename, save
-  // as, etc.) without requiring a round-trip back to the backend.
+  // Keep the OS title bar empty. The active budget is shown by the
+  // in-app sidebar chip; mimicking Finder / Notes / Reminders, the
+  // window chrome stays untitled. We still actively set "" here so any
+  // stale title from a prior session or backend call is cleared.
   useEffect(() => {
     if (loading) return;
-    const label =
-      !isDefaultWorkspace && workspaceMeta?.displayName
-        ? workspaceMeta.displayName
-        : basenameNoExt(dbPath) || "mimo";
-    void getCurrentWindow().setTitle(`mimo — ${label}`);
-  }, [loading, isDefaultWorkspace, workspaceMeta?.displayName, dbPath]);
+    void getCurrentWindow().setTitle("");
+  }, [loading]);
 
   const toggleIncome = (id: number) => {
     setExpandedIncome((prev) => {

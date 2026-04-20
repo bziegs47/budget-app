@@ -1527,12 +1527,11 @@ fn stagger_for_new_window(app: &tauri::AppHandle) -> Option<(f64, f64)> {
     Some((x, y))
 }
 
-fn window_title_from_path(path: &Path) -> String {
-    let name = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "mimo".to_string());
-    format!("mimo — {name}")
+fn window_title_from_path(_path: &Path) -> String {
+    // The window chrome stays untitled — the active budget is conveyed
+    // by the in-app sidebar workspace chip, matching the Finder/Notes
+    // pattern of relying on UI surfaces rather than the OS title bar.
+    String::new()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
