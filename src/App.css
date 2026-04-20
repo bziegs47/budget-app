@@ -1613,8 +1613,8 @@ body {
 }
 
 .recent-name {
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: 0.95rem;
+  font-weight: 500;
   word-break: break-word;
 }
 
