@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 112" fill="none" role="img" aria-label="mimo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 124" fill="none" role="img" aria-label="mimo">
   <title>mimo</title>
   <defs>
     <style type="text/css">
-      @import url("https://fonts.googleapis.com/css2?family=Patrick+Hand&amp;display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=Calligraffitti&amp;display=swap");
     </style>
     <linearGradient id="mwmd" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#d1fae5" />
@@ -12,20 +12,20 @@
   </defs>
   <text
     x="180"
-    y="72"
+    y="78"
     text-anchor="middle"
     fill="url(#mwmd)"
-    font-family="'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Apple Chancery', cursive"
-    font-size="76"
+    font-family="'Calligraffitti', 'Segoe Script', 'Snell Roundhand', cursive"
+    font-size="68"
     font-weight="400"
-    letter-spacing="1"
+    letter-spacing="4"
   >
     mimo
   </text>
-  <g opacity="0.42" stroke="#a7f3d0" stroke-linecap="round" fill="none">
-    <path d="M 38 92 L 98 90" stroke-width="2.2" />
-    <path d="M 96 90 Q 138 94 180 91" stroke-width="3.6" />
-    <path d="M 178 91 Q 222 88 264 92" stroke-width="2.4" />
-    <path d="M 262 92 L 322 91" stroke-width="3.1" />
+  <g opacity="0.4" stroke="#86efac" stroke-linecap="round" fill="none">
+    <path d="M 36 102 L 92 99" stroke-width="2" />
+    <path d="M 88 99 Q 134 106 180 100" stroke-width="3.8" />
+    <path d="M 176 100 Q 226 95 272 101" stroke-width="2.6" />
+    <path d="M 268 101 L 324 99" stroke-width="3.2" />
   </g>
 </svg>

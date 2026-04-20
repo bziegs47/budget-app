@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
-const [W, H] = [360, 112];
+const [W, H] = [360, 124];
 const aspect = H / W;
 
 /** @type {{ out: string; svg: string; width: number }[]} */
