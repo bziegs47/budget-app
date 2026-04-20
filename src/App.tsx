@@ -1626,51 +1626,54 @@ function LibraryView({
                           <LockIcon />
                         </span>
                       )}
+                      <span
+                        className="library-row-actions"
+                        onClick={(ev) => ev.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="library-card-action"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            ev.currentTarget.blur();
+                            onOpenInNewWindow(e.path);
+                          }}
+                          title={`Open ${name} in a new window`}
+                          aria-label={`Open ${name} in a new window`}
+                        >
+                          <NewWindowIcon size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="library-card-action"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            ev.currentTarget.blur();
+                            onRenameWorkspace(e);
+                          }}
+                          title={`Rename ${name}`}
+                          aria-label={`Rename ${name}`}
+                        >
+                          <PencilIcon size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="library-card-action danger"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            ev.currentTarget.blur();
+                            onDeleteWorkspace(e);
+                          }}
+                          title={`Delete ${name}`}
+                          aria-label={`Delete ${name}`}
+                        >
+                          <TrashIcon size={14} />
+                        </button>
+                      </span>
                     </div>
                     <div className="library-row-meta muted">
                       Edited {formatRelative(lastEdited)} · {yearText} · {monthText}
                     </div>
-                  </div>
-                  <div
-                    className="library-row-actions"
-                    onClick={(ev) => ev.stopPropagation()}
-                  >
-                    <button
-                      type="button"
-                      className="library-card-action"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        onOpenInNewWindow(e.path);
-                      }}
-                      title={`Open ${name} in a new window`}
-                      aria-label={`Open ${name} in a new window`}
-                    >
-                      <NewWindowIcon size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="library-card-action"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        onRenameWorkspace(e);
-                      }}
-                      title={`Rename ${name}`}
-                      aria-label={`Rename ${name}`}
-                    >
-                      <PencilIcon size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="library-card-action danger"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        onDeleteWorkspace(e);
-                      }}
-                      title={`Delete ${name}`}
-                      aria-label={`Delete ${name}`}
-                    >
-                      <TrashIcon size={14} />
-                    </button>
                   </div>
                 </div>
               </li>

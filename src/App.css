@@ -1767,10 +1767,7 @@ body {
    by the time the eye reaches the open right edge. */
 .library-row {
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 0.85rem;
+  display: block;
   padding: 0.7rem 0.95rem;
   text-align: left;
   background: transparent;
@@ -1852,16 +1849,20 @@ body {
   color: var(--muted);
 }
 
+/* Sits inline-after the budget name + badges so the icons feel
+   anchored to the title instead of stranded at the empty right edge.
+   Hidden via `display: none` so they don't reserve any space when
+   the row isn't being interacted with. */
 .library-row-actions {
-  display: flex;
+  display: none;
   gap: 0.2rem;
-  opacity: 0;
-  transition: opacity 0.12s ease;
+  margin-left: 0.4rem;
+  align-items: center;
 }
 
 .library-row:hover .library-row-actions,
-.library-row:focus-within .library-row-actions {
-  opacity: 1;
+.library-row:has(:focus-visible) .library-row-actions {
+  display: inline-flex;
 }
 
 .library-card-action {
