@@ -649,14 +649,25 @@ fn open_budget_in_new_window(
 
     let title = window_title_from_path(&path);
     let stagger = stagger_for_new_window(&app_handle);
-    let window = WebviewWindowBuilder::new(&app_handle, &label, WebviewUrl::default())
+    // Path is registered before the window exists. If the build fails we
+    // have to unregister it ourselves — otherwise the label/path mapping
+    // leaks for the lifetime of the process and confuses the next
+    // duplicate-open check (it sees a "registered" label whose window
+    // never existed).
+    let window = match WebviewWindowBuilder::new(&app_handle, &label, WebviewUrl::default())
         .title(title)
         .inner_size(1180.0, 820.0)
         // Build hidden so the cascade position is applied before the user
         // sees the window — otherwise it would flash at the OS default spot.
         .visible(stagger.is_none())
         .build()
-        .map_err(|e| e.to_string())?;
+    {
+        Ok(w) => w,
+        Err(e) => {
+            state.drop_window(&label);
+            return Err(e.to_string());
+        }
+    };
     if let Some((x, y)) = stagger {
         let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         let _ = window.show();
@@ -1438,12 +1449,20 @@ fn create_year_workspace(
     let label = format!("mimo-{}", &Uuid::new_v4().simple().to_string()[..12]);
     state.register_path(&label, path.clone())?;
     let stagger = stagger_for_new_window(&app_handle);
-    let window = WebviewWindowBuilder::new(&app_handle, &label, WebviewUrl::default())
+    // Same path-leak guard as open_budget_in_new_window: if the build
+    // fails we have to drop the registration ourselves.
+    let window = match WebviewWindowBuilder::new(&app_handle, &label, WebviewUrl::default())
         .title(window_title_from_path(&path))
         .inner_size(1180.0, 820.0)
         .visible(stagger.is_none())
         .build()
-        .map_err(|e| e.to_string())?;
+    {
+        Ok(w) => w,
+        Err(e) => {
+            state.drop_window(&label);
+            return Err(e.to_string());
+        }
+    };
     if let Some((x, y)) = stagger {
         let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         let _ = window.show();

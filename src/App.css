@@ -165,6 +165,28 @@ body {
   border-radius: 4px;
 }
 
+/* Invalid blur-save: the planned amount couldn't be parsed (e.g. user
+   typed "abc" or left the dollar sign in). Caller toggles is-invalid
+   and a tiny inline caption replaces the dead-silence no-op. */
+.currency-field.is-invalid {
+  border-color: var(--danger);
+  position: relative;
+}
+
+.currency-field.is-invalid .input-money:focus {
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+.currency-field-error {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  font-size: 0.7rem;
+  color: var(--danger);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .btn {
   border-radius: 8px;
   border: 1px solid var(--border);
