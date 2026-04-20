@@ -1693,11 +1693,21 @@ body {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* Slightly wider min so titles like "Ben Z Side Hustle" stay
+     on a single line at typical window sizes. They're still allowed
+     to wrap when the window gets narrow. */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   /* Tiles are clearly delineated by their own borders, so they can sit
      almost flush. A hairline gap still keeps focus rings & hover transforms
      from clipping into neighbors. */
   gap: 0.25rem;
+}
+
+/* Each grid cell stretches the card to fill the row track; combined
+   with the card's `min-height`, this keeps every tile in a row at the
+   same physical size regardless of how its title or meta line wraps. */
+.library-grid-item {
+  display: flex;
 }
 
 .library-card {
@@ -1715,6 +1725,12 @@ body {
   cursor: pointer;
   transition: border-color 0.12s ease, transform 0.12s ease;
   outline: none;
+  /* Uniform height so a row of cards lines up cleanly even when one
+     title wraps to two lines. The min-height comfortably fits the
+     two-line title + the meta row; cards with a one-line title get
+     extra breathing room rather than a height mismatch. */
+  min-height: 8.5rem;
+  width: 100%;
 }
 
 .library-card:hover {
@@ -1780,15 +1796,23 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  /* Reserve room for the absolutely-positioned rename/delete overlay
-     so badges and the workspace name don't slide underneath it. */
-  padding-right: 3.4rem;
+  /* Reserve room for the absolutely-positioned action overlay so
+     badges and the workspace name don't slide underneath it. Three
+     24px buttons + gaps + edge padding ≈ 5rem. */
+  padding-right: 5rem;
   min-height: 24px;
 }
 
 .library-card-year {
   font-size: 1.05rem;
   font-weight: 650;
+  /* Allow long names to wrap rather than overflow the card, but cap
+     at two lines so the card height stays predictable. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .library-card-lock {
@@ -1832,6 +1856,9 @@ body {
 
 .library-card-meta {
   font-size: 0.78rem;
+  /* Pin to the bottom of the card so all tiles line their meta row up
+     regardless of whether the title above wraps to one or two lines. */
+  margin-top: auto;
 }
 
 .mini-label {

@@ -137,6 +137,29 @@ function CalendarIcon({ size = 16, className }: IconProps) {
   );
 }
 
+function NewWindowIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-9 9" />
+      <path d="M19 13v6a1.5 1.5 0 0 1-1.5 1.5h-12A1.5 1.5 0 0 1 4 19V7a1.5 1.5 0 0 1 1.5-1.5h6" />
+    </svg>
+  );
+}
+
 function TrashIcon({ size = 16, className }: IconProps) {
   return (
     <svg
@@ -1463,6 +1486,7 @@ function LibraryView({
   busy,
   onRescan,
   onOpen,
+  onOpenInNewWindow,
   onCreateYear,
   onRevealFolder,
   onRenameWorkspace,
@@ -1473,6 +1497,7 @@ function LibraryView({
   busy: boolean;
   onRescan: () => void;
   onOpen: (path: string) => void;
+  onOpenInNewWindow: (path: string) => void;
   onCreateYear: () => void;
   onRevealFolder: () => void;
   onRenameWorkspace: (entry: LibraryEntry) => void;
@@ -1557,6 +1582,18 @@ function LibraryView({
                   title={tooltipParts.join("\n")}
                 >
                   <div className="library-card-actions" onClick={(ev) => ev.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="library-card-action"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        onOpenInNewWindow(e.path);
+                      }}
+                      title={`Open ${name} in a new window`}
+                      aria-label={`Open ${name} in a new window`}
+                    >
+                      <NewWindowIcon size={14} />
+                    </button>
                     <button
                       type="button"
                       className="library-card-action"
@@ -6302,6 +6339,9 @@ export default function App() {
               entries={libraryEntries}
               busy={busy}
               onOpen={(p) => void onLibraryOpen(p)}
+              onOpenInNewWindow={(p) =>
+                void openWorkspaceFromHome(p, { forceNewWindow: true })
+              }
               onRescan={() => void rescanLibrary()}
               onRevealFolder={() => void onRevealFolder()}
               onCreateYear={onCreateBudget}
