@@ -14,7 +14,7 @@
     fill="url(#mwmd)"
     font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
     font-weight="600"
-    letter-spacing="8"
+    letter-spacing="0"
   >
     <tspan font-size="50">m</tspan>
     <tspan font-size="45">i</tspan>
@@ -22,7 +22,7 @@
     <tspan font-size="50">o</tspan>
   </text>
   <path
-    d="M 111 78 Q 180 79.5 249 78"
+    d="M 96 78 Q 180 79.5 264 78"
     stroke="#047857"
     stroke-width="2.5"
     stroke-linecap="round"
