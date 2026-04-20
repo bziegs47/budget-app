@@ -260,14 +260,14 @@ function SaveStatusPill({
       );
     }
     return (
-      <span className="status-pill muted-pill" title="Default budget">
+      <span className="status-pill muted-pill">
         <span className="status-dot" /> Scratch budget
       </span>
     );
   }
   if (snapshotBusy) {
     return (
-      <span className="status-pill" title="Writing snapshot…">
+      <span className="status-pill">
         <span className="status-dot busy" /> Auto-saving…
       </span>
     );
@@ -435,6 +435,7 @@ function PopoverCalendar({
           className="cal-nav"
           onClick={goPrev}
           aria-label="Previous month"
+          title="Previous month"
         >
           ‹
         </button>
@@ -444,6 +445,7 @@ function PopoverCalendar({
           className="cal-nav"
           onClick={goNext}
           aria-label="Next month"
+          title="Next month"
         >
           ›
         </button>
@@ -753,7 +755,7 @@ function PlannedAmountInput({
   onBlur: () => void;
 }) {
   return (
-    <span className="currency-field" title="USD — planned amount">
+    <span className="currency-field">
       <span className="currency-symbol">$</span>
       <input
         className="input-money"
@@ -1170,7 +1172,6 @@ function Sidebar({
                   type="button"
                   className="sidebar-month-main"
                   onClick={onShowCrossYear}
-                  title="Compare all years in this budget"
                 >
                   <span className="sidebar-month-label">
                     All years in this budget
@@ -1564,14 +1565,6 @@ function LibraryView({
         <ul className="library-list">
           {sortedEntries.map((e) => {
             const lastEdited = e.lastEditedAt ?? e.lastModified;
-            const tooltipParts: string[] = [];
-            tooltipParts.push(`Last edited ${formatRelative(lastEdited)}`);
-            if (e.lastEditedAt && e.lastEditedAt !== e.lastModified) {
-              tooltipParts.push(
-                `File touched ${formatRelative(e.lastModified)} (cloud sync)`,
-              );
-            }
-            tooltipParts.push(e.path);
             const name = basename(e.path);
             // Build the meta string once so the JSX reads cleanly.
             const labels = e.yearLabels ?? [];
@@ -1605,16 +1598,12 @@ function LibraryView({
                       onOpen(e.path);
                     }
                   }}
-                  title={tooltipParts.join("\n")}
                 >
                   <div className="library-row-info">
                     <div className="library-row-title">
                       <span className="library-row-name">{name}</span>
                       {e.provider && (
-                        <span
-                          className="library-card-badge provider"
-                          title={`Stored in ${e.provider}`}
-                        >
+                        <span className="library-card-badge provider">
                           {e.provider}
                         </span>
                       )}
@@ -1963,13 +1952,12 @@ function CrossYearView({
             const expenseDelta = c.expensePlannedCents - c.expenseActualCents;
             const netDelta = c.netActualCents - c.netPlannedCents;
             return (
-              <button
-                type="button"
-                key={c.yearId}
-                className="cross-year-total-card"
-                onClick={() => onJumpToYear(c.yearId)}
-                title="Open year overview"
-              >
+                <button
+                  type="button"
+                  key={c.yearId}
+                  className="cross-year-total-card"
+                  onClick={() => onJumpToYear(c.yearId)}
+                >
                 <div className="cross-year-total-head">
                   <span className="cross-year-total-label">{c.yearLabel}</span>
                   <span className="cross-year-total-meta">
@@ -2100,7 +2088,6 @@ function CrossYearMatrix({
                   type="button"
                   className="btn-link cross-year-col-link"
                   onClick={() => onJumpToYear(c.yearId)}
-                  title={`Open ${c.yearLabel}`}
                 >
                   {c.yearLabel}
                 </button>
@@ -2234,7 +2221,13 @@ function YtdSlideOver({
               date
             </p>
           </div>
-          <button type="button" className="btn ghost drawer-close" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="btn ghost drawer-close"
+            onClick={onClose}
+            aria-label="Close"
+            title="Close"
+          >
             ×
           </button>
         </div>
@@ -3177,6 +3170,7 @@ function PreferencesModal({
             className="btn ghost preferences-close"
             onClick={onClose}
             aria-label="Close preferences"
+            title="Close preferences"
           >
             ✕
           </button>
@@ -6284,12 +6278,7 @@ export default function App() {
             <span className="brand-tagline">Money In, Money Out | Mind the Flow</span>
           </button>
           <div className="top-bar-spacer" />
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={showHome}
-            title="Home"
-          >
+          <button type="button" className="btn ghost" onClick={showHome}>
             Home
           </button>
           {/* Reports + Library both operate on the open budget. On
