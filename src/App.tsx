@@ -749,13 +749,19 @@ function PlannedAmountInput({
   value,
   onChange,
   onBlur,
+  invalid = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   onBlur: () => void;
+  // Drives a red outline + caption when the previous blur-save couldn't
+  // parse the value. Caller is responsible for clearing it on the next
+  // edit so the warning doesn't linger.
+  invalid?: boolean;
 }) {
+  const cls = `currency-field${invalid ? " is-invalid" : ""}`;
   return (
-    <span className="currency-field">
+    <span className={cls}>
       <span className="currency-symbol">$</span>
       <input
         className="input-money"
@@ -766,7 +772,11 @@ function PlannedAmountInput({
         inputMode="decimal"
         autoComplete="off"
         aria-label="Planned amount (USD)"
+        aria-invalid={invalid || undefined}
       />
+      {invalid && (
+        <span className="currency-field-error">Couldn't read amount</span>
+      )}
     </span>
   );
 }
@@ -5578,29 +5588,65 @@ export default function App() {
     setReorderModalOpen(true);
   }, []);
 
+  // Menu listeners need to bind exactly once for the lifetime of the
+  // window — Tauri rebinds aren't free, and the previous deps array
+  // didn't list every handler the bodies actually called (which is what
+  // the old eslint-disable was hiding). Route everything through a ref
+  // that's refreshed on every render so the listeners always reach the
+  // freshest closure without re-subscribing.
+  //
+  // The ref is initialized lazily because some of the callbacks it
+  // closes over are declared further down in this component body —
+  // populating it here would hit the temporal-dead-zone. We assign
+  // `.current` in a single statement after every callback is defined
+  // (search for `menuHandlersRef.current = {...}` below).
+  type MenuHandlers = {
+    cycleMonth: typeof cycleMonth;
+    onOpenFile: typeof onOpenFile;
+    onCreateBudget: typeof onCreateBudget;
+    onSaveAs: typeof onSaveAs;
+    onToggleAutoSave: typeof onToggleAutoSave;
+    openReorderModal: typeof openReorderModal;
+    onRevealFolder: typeof onRevealFolder;
+    onExportCsv: () => Promise<void>;
+    onExportJson: () => Promise<void>;
+    onExportCsvRedacted: () => Promise<void>;
+    onExportJsonRedacted: () => Promise<void>;
+    onToggleSidebar: typeof onToggleSidebar;
+    showOverview: typeof showOverview;
+    showReports: typeof showReports;
+    showLibrary: typeof showLibrary;
+    openDuplicateYearModal: typeof openDuplicateYearModal;
+    openRenameYearModal: typeof openRenameYearModal;
+    openDeleteYearModal: typeof openDeleteYearModal;
+    showSaveToast: typeof showSaveToast;
+  };
+  const menuHandlersRef = useRef<MenuHandlers | null>(null);
+
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
     const listenSafe = (name: string, fn: () => void) =>
       listen(name, fn).then((u) => unlisteners.push(u));
-    void listenSafe("menu:next-month", () => cycleMonth(1));
-    void listenSafe("menu:prev-month", () => cycleMonth(-1));
-    void listenSafe("menu:open-file", () => void onOpenFile());
-    void listenSafe("menu:new-year", () => onCreateBudget());
-    void listenSafe("menu:save-as", () => void onSaveAs());
-    void listenSafe("menu:toggle-autosave", () => void onToggleAutoSave());
-    void listenSafe("menu:reorganize", () => openReorderModal());
-    void listenSafe("menu:show-default-folder", () => void onRevealFolder());
-    void listenSafe("menu:export-csv", () => void onExportCsv());
-    void listenSafe("menu:export-json", () => void onExportJson());
-    void listenSafe("menu:export-csv-redacted", () => void onExportCsvRedacted());
-    void listenSafe("menu:export-json-redacted", () => void onExportJsonRedacted());
-    void listenSafe("menu:toggle-sidebar", () => onToggleSidebar());
-    void listenSafe("menu:show-overview", () => void showOverview());
-    void listenSafe("menu:show-reports", () => void showReports());
-    void listenSafe("menu:show-library", () => void showLibrary());
-    void listenSafe("menu:duplicate-year", () => void openDuplicateYearModal());
-    void listenSafe("menu:rename-year", () => openRenameYearModal());
-    void listenSafe("menu:delete-year", () => openDeleteYearModal());
+    const h = () => menuHandlersRef.current!;
+    void listenSafe("menu:next-month", () => h().cycleMonth(1));
+    void listenSafe("menu:prev-month", () => h().cycleMonth(-1));
+    void listenSafe("menu:open-file", () => void h().onOpenFile());
+    void listenSafe("menu:new-year", () => h().onCreateBudget());
+    void listenSafe("menu:save-as", () => void h().onSaveAs());
+    void listenSafe("menu:toggle-autosave", () => void h().onToggleAutoSave());
+    void listenSafe("menu:reorganize", () => h().openReorderModal());
+    void listenSafe("menu:show-default-folder", () => void h().onRevealFolder());
+    void listenSafe("menu:export-csv", () => void h().onExportCsv());
+    void listenSafe("menu:export-json", () => void h().onExportJson());
+    void listenSafe("menu:export-csv-redacted", () => void h().onExportCsvRedacted());
+    void listenSafe("menu:export-json-redacted", () => void h().onExportJsonRedacted());
+    void listenSafe("menu:toggle-sidebar", () => h().onToggleSidebar());
+    void listenSafe("menu:show-overview", () => void h().showOverview());
+    void listenSafe("menu:show-reports", () => void h().showReports());
+    void listenSafe("menu:show-library", () => void h().showLibrary());
+    void listenSafe("menu:duplicate-year", () => void h().openDuplicateYearModal());
+    void listenSafe("menu:rename-year", () => h().openRenameYearModal());
+    void listenSafe("menu:delete-year", () => h().openDeleteYearModal());
     void listenSafe("menu:open-preferences", () => setPrefsOpen(true));
     void listenSafe("menu:set-password", () => {
       if (!encryptionAvailableRef.current) {
@@ -5649,7 +5695,7 @@ export default function App() {
         try {
           await invoke("decrypt_workspace");
           setWorkspaceEncrypted(false);
-          showSaveToast("Encryption removed");
+          h().showSaveToast("Encryption removed");
         } catch (e) {
           setError(String(e));
         }
@@ -5658,21 +5704,7 @@ export default function App() {
     return () => {
       unlisteners.forEach((u) => u());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    cycleMonth,
-    onOpenFile,
-    onCreateBudget,
-    onSaveAs,
-    onToggleAutoSave,
-    openReorderModal,
-    onRevealFolder,
-    onToggleSidebar,
-    showOverview,
-    showReports,
-    showLibrary,
-    openDuplicateYearModal,
-  ]);
+  }, []);
 
   // Window-level Cmd+S handler (the menu Save item was removed in favor of a status pill).
   useEffect(() => {
@@ -6073,6 +6105,32 @@ export default function App() {
       ),
     [runExport, monthFilenameStem],
   );
+
+  // Refresh the menu-handler bag every render. Lazy assignment side-steps
+  // the temporal-dead-zone for callbacks declared later in this body, and
+  // the listener effect (mounted once) reads through this ref so the
+  // freshest closures fire without re-subscribing on every render.
+  menuHandlersRef.current = {
+    cycleMonth,
+    onOpenFile,
+    onCreateBudget,
+    onSaveAs,
+    onToggleAutoSave,
+    openReorderModal,
+    onRevealFolder,
+    onExportCsv,
+    onExportJson,
+    onExportCsvRedacted,
+    onExportJsonRedacted,
+    onToggleSidebar,
+    showOverview,
+    showReports,
+    showLibrary,
+    openDuplicateYearModal,
+    openRenameYearModal,
+    openDeleteYearModal,
+    showSaveToast,
+  };
 
   if (loading) {
     return (
@@ -6579,13 +6637,19 @@ function IncomeLineBlock({
   onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
+  const [parseError, setParseError] = useState(false);
   useEffect(() => {
     setPlanned(centsToInputString(line.plannedCents));
+    setParseError(false);
   }, [line.plannedCents]);
 
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
-    if (c === null) return;
+    if (c === null) {
+      setParseError(true);
+      return;
+    }
+    setParseError(false);
     await invoke("set_income_line_planned", { id: line.id, plannedCents: c });
     await onRefresh();
   };
@@ -6597,8 +6661,12 @@ function IncomeLineBlock({
         <td className="num">
           <PlannedAmountInput
             value={planned}
-            onChange={setPlanned}
+            onChange={(v) => {
+              setPlanned(v);
+              if (parseError) setParseError(false);
+            }}
             onBlur={() => void savePlanned()}
+            invalid={parseError}
           />
         </td>
         <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
@@ -6722,13 +6790,19 @@ function ExpenseLineBlock({
   onOpenYtd: () => void;
 }) {
   const [planned, setPlanned] = useState(centsToInputString(line.plannedCents));
+  const [parseError, setParseError] = useState(false);
   useEffect(() => {
     setPlanned(centsToInputString(line.plannedCents));
+    setParseError(false);
   }, [line.plannedCents]);
 
   const savePlanned = async () => {
     const c = parseMoneyToCents(planned);
-    if (c === null) return;
+    if (c === null) {
+      setParseError(true);
+      return;
+    }
+    setParseError(false);
     await invoke("set_expense_line_planned", { id: line.id, plannedCents: c });
     await onRefresh();
   };
@@ -6762,8 +6836,12 @@ function ExpenseLineBlock({
         <td className="num">
           <PlannedAmountInput
             value={planned}
-            onChange={setPlanned}
+            onChange={(v) => {
+              setPlanned(v);
+              if (parseError) setParseError(false);
+            }}
             onBlur={() => void savePlanned()}
+            invalid={parseError}
           />
         </td>
         <td className="num">{formatUsd(line.actualCents, "rounded")}</td>

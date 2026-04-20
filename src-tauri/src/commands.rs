@@ -149,56 +149,6 @@ fn compute_ytd(conn: &Connection, active_period_end: &str) -> Result<YtdTotals, 
     })
 }
 
-/// Calendar-year YTD: aggregates by `transactions.occurred_on` and
-/// `income_entries.received_on` (the dates the user typed in), regardless of
-/// which budget period they belong to. Mirrors `compute_ytd` for ease of comparison.
-fn compute_calendar_ytd(conn: &Connection, active_period_end: &str) -> Result<YtdTotals, String> {
-    let pe = period::parse_iso(active_period_end)?;
-    let y = pe.year();
-    let start = NaiveDate::from_ymd_opt(y, 1, 1)
-        .ok_or_else(|| "Invalid calendar year".to_string())?;
-    let start_iso = start.format("%Y-%m-%d").to_string();
-    let end_iso = pe.format("%Y-%m-%d").to_string();
-
-    let income: i64 = conn
-        .query_row(
-            r#"
-            SELECT COALESCE(SUM(ie.amount_cents), 0)
-            FROM income_entries ie
-            WHERE ie.received_on IS NOT NULL
-              AND date(ie.received_on) >= date(?1)
-              AND date(ie.received_on) <= date(?2)
-            "#,
-            params![start_iso, end_iso],
-            |r| r.get(0),
-        )
-        .map_err(err)?;
-
-    let expense_net: i64 = conn
-        .query_row(
-            r#"
-            SELECT COALESCE(SUM(t.amount_cents), 0)
-            FROM transactions t
-            JOIN expense_lines el ON el.id = t.expense_line_id
-            WHERE el.is_neutral_transfer = 0
-              AND t.occurred_on IS NOT NULL
-              AND date(t.occurred_on) >= date(?1)
-              AND date(t.occurred_on) <= date(?2)
-            "#,
-            params![start_iso, end_iso],
-            |r| r.get(0),
-        )
-        .map_err(err)?;
-
-    Ok(YtdTotals {
-        year: y,
-        through_month: end_iso,
-        income_actual_cents: income,
-        expense_net_actual_cents: expense_net,
-        net_actual_cents: income - expense_net,
-    })
-}
-
 fn parse_ym(s: &str) -> Result<(i32, i32), String> {
     let parts: Vec<&str> = s.split('-').collect();
     if parts.len() != 2 {
@@ -224,7 +174,6 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
     let tab_label = period::format_tab_label(&period_start, &period_end);
     let mut ytd = compute_ytd(conn, &period_end)?;
     ytd.through_month = tab_label.clone();
-    let ytd_by_date = compute_calendar_ytd(conn, &period_end)?;
 
     let mut income_stmt = conn
         .prepare(
@@ -435,7 +384,6 @@ pub fn get_month_view(conn: &Connection, month_id: i64) -> Result<MonthView, Str
         expense_buckets,
         summary,
         ytd,
-        ytd_by_date,
     })
 }
 
@@ -1442,13 +1390,17 @@ pub fn scaffold_year(conn: &mut Connection, year: i32) -> Result<Vec<i64>, Strin
     let mut ids: Vec<i64> = Vec::with_capacity(12);
     for m in 1u32..=12 {
         let (ps, pe) = period::full_month_bounds(year, m).map_err(err)?;
+        // Use .optional()? so a real DB error (lock contention, missing
+        // table, etc.) propagates instead of being silently coerced into
+        // "row not found" by the previous .ok() call.
         let existing: Option<i64> = conn
             .query_row(
                 "SELECT id FROM budget_months WHERE period_start = ?1 AND period_end = ?2",
                 params![ps, pe],
                 |r| r.get(0),
             )
-            .ok();
+            .optional()
+            .map_err(err)?;
         if let Some(id) = existing {
             ids.push(id);
             continue;

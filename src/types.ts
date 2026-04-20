@@ -83,8 +83,6 @@ export type MonthView = {
   summary: MonthSummary;
   /** YTD aggregated by budget period (which periods have closed up to this month). */
   ytd: YtdTotals;
-  /** YTD aggregated by transaction date (occurredOn / receivedOn) within the calendar year. */
-  ytdByDate: YtdTotals;
 };
 
 export type MonthRow = {

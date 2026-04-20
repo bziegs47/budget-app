@@ -138,9 +138,6 @@ pub struct MonthView {
     pub summary: MonthSummary,
     /// YTD totals aggregated by **budget period** (which periods have closed up to this month).
     pub ytd: YtdTotals,
-    /// YTD totals aggregated by **transaction date** (`occurred_on`/`received_on`),
-    /// from Jan 1 of the calendar year through the active period end.
-    pub ytd_by_date: YtdTotals,
 }
 
 #[derive(Debug, Serialize)]
