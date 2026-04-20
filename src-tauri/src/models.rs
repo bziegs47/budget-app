@@ -358,6 +358,13 @@ pub struct LibraryEntry {
     pub expense_net_actual_cents: i64,
     pub net_actual_cents: i64,
     pub month_count: i64,
+    /// Months with at least one income entry or one non-neutral
+    /// transaction. Mirrors the per-year "months tracked" metric and
+    /// drives the same string on the library tile so a freshly
+    /// scaffolded budget reads "0 months tracked" instead of "24
+    /// months tracked".
+    #[serde(default)]
+    pub tracked_month_count: i64,
     /// Distinct calendar years stored in this budget, sorted descending
     /// (most recent first). Empty for legacy / encrypted entries.
     #[serde(default)]

@@ -208,6 +208,31 @@ pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
     let month_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM budget_months", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
+    // "Tracked" = months that have at least one income entry or one
+    // non-neutral expense transaction. Neutral transfers (credit-card
+    // payments, internal moves) don't count as activity because they
+    // don't represent real spending.
+    let tracked_month_count: i64 = conn
+        .query_row(
+            r#"
+            SELECT COUNT(*) FROM budget_months bm
+            WHERE EXISTS (
+                SELECT 1 FROM income_entries ie
+                JOIN income_lines il ON il.id = ie.income_line_id
+                WHERE il.month_id = bm.id
+            )
+               OR EXISTS (
+                SELECT 1 FROM transactions t
+                JOIN expense_lines el ON el.id = t.expense_line_id
+                JOIN expense_buckets eb ON eb.id = el.bucket_id
+                WHERE eb.month_id = bm.id
+                  AND el.is_neutral_transfer = 0
+            )
+            "#,
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
 
     // Multi-year files are now the norm, so the tile needs to know
     // every year in the budget — not just the legacy single
@@ -234,6 +259,7 @@ pub fn read_library_entry(path: &Path) -> Result<LibraryEntry, String> {
         expense_net_actual_cents: expense_net_actual,
         net_actual_cents: income_actual - expense_net_actual,
         month_count,
+        tracked_month_count,
         year_labels,
         year_count,
         encrypted: false,
@@ -505,6 +531,7 @@ fn encrypted_entry(path: &Path, cached: &[LibraryEntry]) -> LibraryEntry {
         expense_net_actual_cents: 0,
         net_actual_cents: 0,
         month_count: 0,
+        tracked_month_count: 0,
         year_labels: Vec::new(),
         year_count: 0,
         encrypted: true,

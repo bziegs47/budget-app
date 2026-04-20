@@ -189,6 +189,10 @@ export type LibraryEntry = {
   expenseNetActualCents: number;
   netActualCents: number;
   monthCount: number;
+  /** Months that have at least one income entry or non-neutral
+   * transaction. Optional for backward compatibility with cached
+   * library indexes written before this field existed. */
+  trackedMonthCount?: number;
   /** Distinct calendar years in this budget, sorted descending. */
   yearLabels?: string[];
   /** Convenience count; equals `yearLabels?.length ?? 0`. */

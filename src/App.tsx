@@ -1628,33 +1628,19 @@ function LibraryView({
                         const sorted = [...labels].sort();
                         yearText = `${labels.length} years (${sorted[0]}–${sorted[sorted.length - 1]})`;
                       }
-                      const monthText = `${e.monthCount} ${e.monthCount === 1 ? "month" : "months"} tracked`;
+                      // Tracked = months with real activity, not the
+                      // 12 always-scaffolded slots. Fall back to
+                      // `monthCount` only when an old cached index
+                      // entry hasn't been re-scanned yet.
+                      const tracked =
+                        e.trackedMonthCount ?? e.monthCount;
+                      const monthText = `${tracked} ${tracked === 1 ? "month" : "months"} tracked`;
                       return (
                         <>
                           Edited {formatRelative(lastEdited)} · {yearText} · {monthText}
                         </>
                       );
                     })()}
-                  </div>
-                  <div className="library-card-totals">
-                    <div>
-                      <span className="mini-label">Income</span>
-                      <span className="num">
-                        {formatUsd(e.incomeActualCents, "rounded")}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="mini-label">Net spend</span>
-                      <span className="num">
-                        {formatUsd(e.expenseNetActualCents, "rounded")}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="mini-label">Net</span>
-                      <span className="num">
-                        {formatUsd(e.netActualCents, "rounded")}
-                      </span>
-                    </div>
                   </div>
                 </div>
               </li>
