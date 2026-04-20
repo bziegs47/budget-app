@@ -31,6 +31,10 @@ pub fn open_with_optional_key(
     if let Some(k) = key {
         apply_key(&conn, k)?;
     }
+    // Pin rollback journaling so the workspace stays a single-file
+    // artifact. WAL would leave -wal/-shm sidecars next to the .mimo,
+    // which breaks snapshot copies and atomic-rename saves.
+    conn.pragma_update(None, "journal_mode", &"DELETE")?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     // Probe schema access early. On an encrypted DB without the right key
     // (or on any DB with a wrong key) this returns SQLITE_NOTADB so
