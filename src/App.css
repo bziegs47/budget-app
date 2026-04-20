@@ -1711,74 +1711,85 @@ body {
   background: var(--surface);
 }
 
-.library-grid {
+/* Library list — Finder-style rows so long names get to breathe and
+   short ones don't leave huge dead space. Each row is two lines
+   (title + meta) inside a single grid cell, with the action icons
+   pinned to the right and only revealed on hover/focus to keep the
+   default reading experience calm. */
+.library-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  /* Slightly wider min so titles like "Ben Z Side Hustle" stay
-     on a single line at typical window sizes. They're still allowed
-     to wrap when the window gets narrow. */
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  /* Tiles are clearly delineated by their own borders, so they can sit
-     almost flush. A hairline gap still keeps focus rings & hover transforms
-     from clipping into neighbors. */
-  gap: 0.25rem;
-}
-
-/* Each grid cell stretches the card to fill the row track; combined
-   with the card's `min-height`, this keeps every tile in a row at the
-   same physical size regardless of how its title or meta line wraps. */
-.library-grid-item {
-  display: flex;
-}
-
-.library-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  text-align: left;
-  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 0.85rem 1rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.library-list-item + .library-list-item .library-row {
+  border-top: 1px solid var(--border);
+}
+
+.library-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.65rem 0.95rem;
+  text-align: left;
+  background: transparent;
   font: inherit;
   color: var(--text);
   cursor: pointer;
-  transition: border-color 0.12s ease, transform 0.12s ease;
   outline: none;
-  /* Uniform height so a row of cards lines up cleanly even when one
-     title wraps to two lines. The min-height comfortably fits the
-     two-line title + the meta row; cards with a one-line title get
-     extra breathing room rather than a height mismatch. */
-  min-height: 8.5rem;
-  width: 100%;
+  transition: background-color 0.12s ease;
 }
 
-.library-card:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
+.library-row:hover,
+.library-row:focus-visible {
+  background: var(--surface-2);
 }
 
-.library-card:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+.library-row:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-.library-card-actions {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.4rem;
+.library-row.is-conflict {
+  background: color-mix(in srgb, #d18a85 6%, transparent);
+}
+
+.library-row-info {
+  min-width: 0;
+}
+
+.library-row-title {
   display: flex;
-  gap: 0.15rem;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 650;
+  flex-wrap: wrap;
+}
+
+.library-row-name {
+  word-break: break-word;
+}
+
+.library-row-meta {
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+  color: var(--muted);
+}
+
+.library-row-actions {
+  display: flex;
+  gap: 0.2rem;
   opacity: 0;
   transition: opacity 0.12s ease;
-  z-index: 1;
 }
 
-.library-card:hover .library-card-actions,
-.library-card:focus-within .library-card-actions {
+.library-row:hover .library-row-actions,
+.library-row:focus-within .library-row-actions {
   opacity: 1;
 }
 
@@ -1814,38 +1825,9 @@ body {
   outline-offset: 1px;
 }
 
-.library-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  /* Reserve room for the absolutely-positioned action overlay so
-     badges and the workspace name don't slide underneath it. Three
-     24px buttons + gaps + edge padding ≈ 5rem. */
-  padding-right: 5rem;
-  min-height: 24px;
-}
-
-.library-card-year {
-  font-size: 1.05rem;
-  font-weight: 650;
-  /* Allow long names to wrap rather than overflow the card, but cap
-     at two lines so the card height stays predictable. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-word;
-}
-
 .library-card-lock {
   color: var(--muted);
-}
-
-.library-card-badges {
-  display: flex;
-  gap: 0.35rem;
-  flex-wrap: wrap;
+  display: inline-flex;
   align-items: center;
 }
 
@@ -1871,17 +1853,6 @@ body {
   color: #b8413a;
   border-color: #d18a85;
   background: color-mix(in srgb, #d18a85 12%, var(--surface-2));
-}
-
-.library-card.is-conflict {
-  border-color: #d18a85;
-}
-
-.library-card-meta {
-  font-size: 0.78rem;
-  /* Pin to the bottom of the card so all tiles line their meta row up
-     regardless of whether the title above wraps to one or two lines. */
-  margin-top: auto;
 }
 
 .mini-label {

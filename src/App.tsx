@@ -1561,7 +1561,7 @@ function LibraryView({
           <p className="muted">Create one above, or open an existing file from elsewhere.</p>
         </div>
       ) : (
-        <ul className="library-grid">
+        <ul className="library-list">
           {sortedEntries.map((e) => {
             const lastEdited = e.lastEditedAt ?? e.lastModified;
             const tooltipParts: string[] = [];
@@ -1573,21 +1573,31 @@ function LibraryView({
             }
             tooltipParts.push(e.path);
             const name = basename(e.path);
-            const cardClass = [
-              "library-card",
+            // Build the meta string once so the JSX reads cleanly.
+            const labels = e.yearLabels ?? [];
+            let yearText: string;
+            if (labels.length === 0) {
+              yearText = e.encrypted ? "Locked" : "No years";
+            } else if (labels.length === 1) {
+              yearText = labels[0];
+            } else {
+              const sorted = [...labels].sort();
+              yearText = `${labels.length} years (${sorted[0]}–${sorted[sorted.length - 1]})`;
+            }
+            const tracked = e.trackedMonthCount ?? e.monthCount;
+            const monthText = `${tracked} ${tracked === 1 ? "month" : "months"} tracked`;
+            const rowClass = [
+              "library-row",
               e.isConflictCopy ? "is-conflict" : "",
             ]
               .filter(Boolean)
               .join(" ");
             return (
-              <li
-                key={e.path}
-                className={e.isConflictCopy ? "library-grid-item conflict" : "library-grid-item"}
-              >
+              <li key={e.path} className="library-list-item">
                 <div
                   role="button"
                   tabIndex={0}
-                  className={cardClass}
+                  className={rowClass}
                   onClick={() => onOpen(e.path)}
                   onKeyDown={(ev) => {
                     if (ev.key === "Enter" || ev.key === " ") {
@@ -1597,7 +1607,42 @@ function LibraryView({
                   }}
                   title={tooltipParts.join("\n")}
                 >
-                  <div className="library-card-actions" onClick={(ev) => ev.stopPropagation()}>
+                  <div className="library-row-info">
+                    <div className="library-row-title">
+                      <span className="library-row-name">{name}</span>
+                      {e.provider && (
+                        <span
+                          className="library-card-badge provider"
+                          title={`Stored in ${e.provider}`}
+                        >
+                          {e.provider}
+                        </span>
+                      )}
+                      {e.isConflictCopy && (
+                        <span
+                          className="library-card-badge conflict"
+                          title="Cloud sync conflict copy. Compare with the canonical file before merging."
+                        >
+                          Conflict copy
+                        </span>
+                      )}
+                      {e.encrypted && (
+                        <span
+                          className="library-card-lock"
+                          title="Encrypted"
+                        >
+                          <LockIcon />
+                        </span>
+                      )}
+                    </div>
+                    <div className="library-row-meta muted">
+                      Edited {formatRelative(lastEdited)} · {yearText} · {monthText}
+                    </div>
+                  </div>
+                  <div
+                    className="library-row-actions"
+                    onClick={(ev) => ev.stopPropagation()}
+                  >
                     <button
                       type="button"
                       className="library-card-action"
@@ -1634,66 +1679,6 @@ function LibraryView({
                     >
                       <TrashIcon size={14} />
                     </button>
-                  </div>
-                  <div className="library-card-head">
-                    <span className="library-card-year">{name}</span>
-                    <div className="library-card-badges">
-                      {e.provider && (
-                        <span
-                          className="library-card-badge provider"
-                          title={`Stored in ${e.provider}`}
-                        >
-                          {e.provider}
-                        </span>
-                      )}
-                      {e.isConflictCopy && (
-                        <span
-                          className="library-card-badge conflict"
-                          title="Cloud sync conflict copy. Compare with the canonical file before merging."
-                        >
-                          Conflict copy
-                        </span>
-                      )}
-                      {e.encrypted && (
-                        <span
-                          className="library-card-lock"
-                          title="Encrypted"
-                        >
-                          <LockIcon />
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="library-card-meta muted">
-                    {(() => {
-                      // Multi-year files now exist, so the tile shows
-                      // "N years (low–high)" when the budget spans
-                      // more than one calendar year. For single-year
-                      // files we just print the year. The basename
-                      // already labels the file so we don't repeat it.
-                      const labels = e.yearLabels ?? [];
-                      let yearText: string;
-                      if (labels.length === 0) {
-                        yearText = e.encrypted ? "Locked" : "No years";
-                      } else if (labels.length === 1) {
-                        yearText = labels[0];
-                      } else {
-                        const sorted = [...labels].sort();
-                        yearText = `${labels.length} years (${sorted[0]}–${sorted[sorted.length - 1]})`;
-                      }
-                      // Tracked = months with real activity, not the
-                      // 12 always-scaffolded slots. Fall back to
-                      // `monthCount` only when an old cached index
-                      // entry hasn't been re-scanned yet.
-                      const tracked =
-                        e.trackedMonthCount ?? e.monthCount;
-                      const monthText = `${tracked} ${tracked === 1 ? "month" : "months"} tracked`;
-                      return (
-                        <>
-                          Edited {formatRelative(lastEdited)} · {yearText} · {monthText}
-                        </>
-                      );
-                    })()}
                   </div>
                 </div>
               </li>
