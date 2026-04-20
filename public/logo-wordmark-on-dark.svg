@@ -1,9 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 124" fill="none" role="img" aria-label="mimo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" fill="none" role="img" aria-label="mimo">
   <title>mimo</title>
   <defs>
-    <style type="text/css">
-      @import url("https://fonts.googleapis.com/css2?family=Calligraffitti&amp;display=swap");
-    </style>
     <linearGradient id="mwd" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#d1fae5" />
       <stop offset="45%" stop-color="#6ee7b7" />
@@ -12,20 +9,24 @@
   </defs>
   <text
     x="180"
-    y="78"
+    y="62"
     text-anchor="middle"
     fill="url(#mwd)"
-    font-family="'Calligraffitti', 'Segoe Script', 'Snell Roundhand', cursive"
-    font-size="68"
-    font-weight="400"
-    letter-spacing="4"
+    font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="50"
+    font-weight="600"
+    letter-spacing="8"
   >
     mimo
   </text>
-  <g opacity="0.4" stroke="#86efac" stroke-linecap="round" fill="none">
-    <path d="M 36 102 L 92 99" stroke-width="2" />
-    <path d="M 88 99 Q 134 106 180 100" stroke-width="3.8" />
-    <path d="M 176 100 Q 226 95 272 101" stroke-width="2.6" />
-    <path d="M 268 101 L 324 99" stroke-width="3.2" />
-  </g>
+  <line
+    x1="44"
+    y1="78"
+    x2="316"
+    y2="78"
+    stroke="#047857"
+    stroke-width="2.5"
+    stroke-linecap="round"
+    opacity="0.55"
+  />
 </svg>
