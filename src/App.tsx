@@ -794,6 +794,8 @@ function BucketReorderModal({
     }
   }, [open, buckets]);
 
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open, onClose);
+
   if (!open) return null;
 
   const nameFor = (id: number) => buckets.find((b) => b.id === id)?.name ?? `#${id}`;
@@ -822,6 +824,7 @@ function BucketReorderModal({
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={trapRef}
         className="modal-card bucket-reorder-card"
         role="dialog"
         aria-modal="true"
@@ -914,6 +917,7 @@ function UnsavedChangesModal({
   onDiscard: () => void;
   onCancel: () => void;
 }) {
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open && !busy, onCancel);
   if (!open) return null;
   // "close" is the per-window flow (red X / Cmd+W). "quit" is reserved
   // for an actual app-wide exit prompt - we keep it parameterized so a
@@ -933,6 +937,7 @@ function UnsavedChangesModal({
       }}
     >
       <div
+        ref={trapRef}
         className="modal-card unsaved-changes-card"
         role="dialog"
         aria-modal="true"
@@ -2641,6 +2646,11 @@ function ExpenseLineEditModal({
     setBusy(false);
   }, [config]);
 
+  const trapRef = useModalFocusTrap<HTMLDivElement>(
+    config != null && !busy,
+    onCancel,
+  );
+
   if (!config) return null;
 
   const isAdd = config.mode === "add";
@@ -2676,6 +2686,7 @@ function ExpenseLineEditModal({
       }}
     >
       <div
+        ref={trapRef}
         className="modal-card line-edit-card"
         role="dialog"
         aria-modal="true"
@@ -2764,6 +2775,7 @@ function ConfirmDeleteRowModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open && !busy, onCancel);
   if (!open) return null;
   return (
     <div
@@ -2774,6 +2786,7 @@ function ConfirmDeleteRowModal({
       }}
     >
       <div
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -2819,22 +2832,97 @@ const preventFocusSteal = (e: ReactMouseEvent<HTMLButtonElement>) => {
   e.preventDefault();
 };
 
-// Shared Escape-to-close hook used by every modal in this file. Centralizing
-// it ensures the contract is consistent: only fires while the modal is open
-// and not busy, and removes its own listener as soon as either flips.
-function useModalEscape(active: boolean, onEscape: () => void) {
+// Selector for elements that should participate in the modal Tab cycle.
+// Mirrors the WAI-ARIA "tabbable" set; the offsetParent check below filters
+// out anything that isn't currently rendered (display:none, etc.).
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function getFocusableWithin(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+}
+
+// Shared focus-trap hook used by every modal in this file. Beyond the
+// Escape-to-close contract, this also:
+//   - traps Tab / Shift+Tab focus inside the modal container,
+//   - moves focus into the container on open if no child claimed it
+//     (e.g. via autoFocus), and
+//   - restores focus to the previously-focused element on close,
+// so keyboard-only and screen-reader users can't escape into the
+// disabled background. Callers attach the returned ref to the
+// modal-card element (the form/div that wraps the modal content).
+function useModalFocusTrap<T extends HTMLElement>(
+  active: boolean,
+  onEscape: () => void,
+): React.RefObject<T | null> {
+  const containerRef = useRef<T | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!active) return;
+    previousFocusRef.current =
+      (document.activeElement as HTMLElement | null) ?? null;
+
+    // Defer the initial focus check to the next frame so children that use
+    // `autoFocus` get to claim focus first; only fall back to the
+    // container/first-focusable if nothing inside took it.
+    const focusFrame = requestAnimationFrame(() => {
+      const node = containerRef.current;
+      if (!node) return;
+      if (!node.contains(document.activeElement)) {
+        const focusables = getFocusableWithin(node);
+        const target = focusables[0] ?? node;
+        if (target === node && !node.hasAttribute("tabindex")) {
+          node.setAttribute("tabindex", "-1");
+        }
+        target.focus();
+      }
+    });
+
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         onEscape();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const node = containerRef.current;
+      if (!node) return;
+      const focusables = getFocusableWithin(node);
+      if (focusables.length === 0) {
+        e.preventDefault();
+        node.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const current = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (current === first || !node.contains(current)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (current === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handler);
+      const previous = previousFocusRef.current;
+      previousFocusRef.current = null;
+      if (previous && document.body.contains(previous)) {
+        previous.focus();
+      }
+    };
   }, [active, onEscape]);
+
+  return containerRef;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2890,7 +2978,7 @@ function PasswordModal({
       setConfirm("");
     }
   }, [open, kind]);
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open) return null;
   const needsConfirm = kind !== "unlock";
   const trimmed = pw;
@@ -2922,6 +3010,7 @@ function PasswordModal({
       onClick={busy ? undefined : onCancel}
     >
       <form
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -3054,7 +3143,7 @@ function PreferencesModal({
     }
   }, [open, settings?.defaultFolder, workspaceMeta?.displayName, refreshCloudProbes]);
 
-  useModalEscape(open, onClose);
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open, onClose);
 
   if (!open) return null;
 
@@ -3156,6 +3245,7 @@ function PreferencesModal({
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={trapRef}
         className="modal-card preferences-card"
         role="dialog"
         aria-modal="true"
@@ -3467,7 +3557,7 @@ function CreateYearModal({
       setTouched(false);
     }
   }, [open, defaultYear, mode]);
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open) return null;
   const trimmed = label.trim();
   let error: string | null = null;
@@ -3520,6 +3610,7 @@ function CreateYearModal({
       onClick={busy ? undefined : onCancel}
     >
       <form
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -3593,7 +3684,7 @@ function RenameYearModal({
       setTouched(false);
     }
   }, [open, initial]);
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open) return null;
   const trimmed = value.trim();
   const validShape = /^\d{4}$/.test(trimmed);
@@ -3628,6 +3719,7 @@ function RenameYearModal({
       onClick={busy ? undefined : onCancel}
     >
       <form
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -3692,7 +3784,7 @@ function DeleteYearConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open && !busy, onCancel);
   if (!open) return null;
   const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -3706,6 +3798,7 @@ function DeleteYearConfirmModal({
       onClick={busy ? undefined : onCancel}
     >
       <div
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -3765,7 +3858,7 @@ function RenameWorkspaceModal({
       setTouched(false);
     }
   }, [open, initial]);
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open) return null;
   const trimmed = value.trim();
   // Mirror the backend validation in settings.rs::sanitize_basename so
@@ -3802,6 +3895,7 @@ function RenameWorkspaceModal({
       onClick={busy ? undefined : onCancel}
     >
       <form
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -3867,7 +3961,7 @@ function DeleteWorkspaceConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open && !busy, onCancel);
   if (!open) return null;
   const handleCancel = (e: ReactMouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -3881,6 +3975,7 @@ function DeleteWorkspaceConfirmModal({
       onClick={busy ? undefined : onCancel}
     >
       <div
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -3937,11 +4032,12 @@ function OpenInWindowModal({
   onCancel: () => void;
   onPick: (where: "current" | "new") => void;
 }) {
-  useModalEscape(open, onCancel);
+  const trapRef = useModalFocusTrap<HTMLDivElement>(open, onCancel);
   if (!open) return null;
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <div
+        ref={trapRef}
         className="modal-card"
         role="dialog"
         aria-modal="true"
@@ -4028,7 +4124,7 @@ function DuplicateYearModal({
       setTouched(false);
     }
   }, [open, initialDest, calendarMonths]);
-  useModalEscape(open && !busy, onCancel);
+  const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open || !sourceYear) return null;
   const trimmed = destLabel.trim();
   const validShape = /^\d{4}$/.test(trimmed);
@@ -4069,6 +4165,7 @@ function DuplicateYearModal({
       onClick={busy ? undefined : onCancel}
     >
       <form
+        ref={trapRef}
         className="modal-card line-edit-card"
         role="dialog"
         aria-modal="true"
