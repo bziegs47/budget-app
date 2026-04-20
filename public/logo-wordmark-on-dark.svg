@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 104" fill="none" role="img" aria-label="mimo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 112" fill="none" role="img" aria-label="mimo">
   <title>mimo</title>
   <defs>
     <style type="text/css">
-      @import url("https://fonts.googleapis.com/css2?family=Caveat:wght@600&amp;display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=Patrick+Hand&amp;display=swap");
     </style>
     <linearGradient id="mwd" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#d1fae5" />
@@ -12,22 +12,20 @@
   </defs>
   <text
     x="180"
-    y="68"
+    y="72"
     text-anchor="middle"
     fill="url(#mwd)"
-    font-family="Caveat, 'Segoe Script', 'Snell Roundhand', 'Apple Chancery', cursive"
-    font-size="64"
-    font-weight="600"
-    letter-spacing="2"
+    font-family="'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Apple Chancery', cursive"
+    font-size="76"
+    font-weight="400"
+    letter-spacing="1"
   >
     mimo
   </text>
-  <path
-    d="M 40 86 Q 118 82 180 86 T 320 85"
-    stroke="#86efac"
-    stroke-width="1.75"
-    stroke-linecap="round"
-    fill="none"
-    opacity="0.35"
-  />
+  <g opacity="0.42" stroke="#a7f3d0" stroke-linecap="round" fill="none">
+    <path d="M 38 92 L 98 90" stroke-width="2.2" />
+    <path d="M 96 90 Q 138 94 180 91" stroke-width="3.6" />
+    <path d="M 178 91 Q 222 88 264 92" stroke-width="2.4" />
+    <path d="M 262 92 L 322 91" stroke-width="3.1" />
+  </g>
 </svg>
