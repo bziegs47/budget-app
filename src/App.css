@@ -1720,22 +1720,21 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  overflow: hidden;
 }
 
-.library-list-item + .library-list-item .library-row {
-  border-top: 1px solid var(--border);
-}
-
+/* Each row carries its own top divider so we keep just horizontal
+   lines (no left/right borders or container chrome). The last row
+   adds a matching bottom divider so the list reads as a closed band
+   without feeling boxed-in. The dividers fade left-to-right so they
+   look anchored to the title column and dissolve into the background
+   by the time the eye reaches the open right edge. */
 .library-row {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.85rem;
-  padding: 0.65rem 0.95rem;
+  padding: 0.7rem 0.95rem;
   text-align: left;
   background: transparent;
   font: inherit;
@@ -1745,17 +1744,52 @@ body {
   transition: background-color 0.12s ease;
 }
 
+.library-row::before,
+.library-list-item:last-child .library-row::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    var(--border) 0%,
+    var(--border) 35%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.library-row::before {
+  top: 0;
+}
+
+.library-list-item:last-child .library-row::after {
+  bottom: 0;
+}
+
 .library-row:hover,
 .library-row:focus-visible {
-  background: var(--surface-2);
+  background: linear-gradient(
+    to right,
+    var(--surface-2) 0%,
+    var(--surface-2) 60%,
+    transparent 100%
+  );
 }
 
 .library-row:focus-visible {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: inset 2px 0 0 0
+    color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .library-row.is-conflict {
-  background: color-mix(in srgb, #d18a85 6%, transparent);
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, #d18a85 10%, transparent) 0%,
+    color-mix(in srgb, #d18a85 6%, transparent) 60%,
+    transparent 100%
+  );
 }
 
 .library-row-info {
