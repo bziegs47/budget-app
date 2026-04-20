@@ -3559,14 +3559,18 @@ function CreateYearModal({
   onCreate: (label: string) => void;
 }) {
   const isBudgetMode = mode === "budget";
-  const [label, setLabel] = useState(String(defaultYear));
+  // Budget mode is the "name a multi-year workspace" flow, so we leave
+  // the field blank instead of seeding it with this year's number;
+  // year mode still prefills with the suggested next year so the
+  // common case (just hit Enter) keeps working.
+  const [label, setLabel] = useState(isBudgetMode ? "" : String(defaultYear));
   const [touched, setTouched] = useState(false);
   useEffect(() => {
     if (open) {
-      setLabel(String(defaultYear));
+      setLabel(isBudgetMode ? "" : String(defaultYear));
       setTouched(false);
     }
-  }, [open, defaultYear, mode]);
+  }, [open, defaultYear, mode, isBudgetMode]);
   const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open) return null;
   const trimmed = label.trim();
@@ -3612,7 +3616,7 @@ function CreateYearModal({
     ? "Name your budget and mimo will create a new file in your default folder, scaffolded with January through December for the current year. You can rename or delete it later."
     : "January through December will be created automatically. You can rename or delete the year later.";
   const fieldLabel = isBudgetMode ? "Budget name" : "Year";
-  const placeholder = isBudgetMode ? "e.g. Family 2026" : "e.g. 2026";
+  const placeholder = isBudgetMode ? "e.g. Household budget" : "e.g. 2026";
   return (
     <div
       className="modal-backdrop"
