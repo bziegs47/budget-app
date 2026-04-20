@@ -1420,29 +1420,105 @@ function YearEndNudge({
   );
 }
 
-function YearsLanding({
+// Budget dashboard. Replaces the old "pick a year" tile grid with a
+// single screen that pulls double-duty: a year-totals strip that
+// also acts as the year picker, plus a snapshot card for the current
+// (or most recent) year so the user has something to look at instead
+// of a wall of identical cards. Reuses existing IPC — no backend
+// changes — and intentionally leaves the sidebar alone.
+function BudgetDashboard({
   years,
+  crossYear,
+  crossYearLoading,
+  snapshot,
+  snapshotLoading,
+  currentYearId,
   onSelectYear,
   onCreateYear,
-  workspaceName,
+  onShowCrossYear,
+  onOpenMonth,
   yearEndNudge,
   onStartYearEndNudge,
 }: {
   years: YearRow[];
+  crossYear: CrossYearOverview | null;
+  crossYearLoading: boolean;
+  snapshot: YearOverview | null;
+  snapshotLoading: boolean;
+  currentYearId: number | null;
   onSelectYear: (id: number) => void;
   onCreateYear: () => void;
-  workspaceName: string;
+  onShowCrossYear: () => void;
+  onOpenMonth: (id: number) => void;
   yearEndNudge: { sourceLabel: string; nextLabel: string } | null;
   onStartYearEndNudge: () => void;
 }) {
+  // Strip data preference: live cross-year data when available, fall
+  // back to per-year rows so the strip never blanks out while the
+  // first cross-year fetch is in flight.
+  type StripCard = {
+    yearId: number;
+    yearLabel: string;
+    incomeActualCents: number;
+    expenseActualCents: number;
+    netActualCents: number;
+    trackedMonthCount: number;
+  };
+  const stripCards: StripCard[] =
+    crossYear && crossYear.columns.length > 0
+      ? crossYear.columns.map((c) => ({
+          yearId: c.yearId,
+          yearLabel: c.yearLabel,
+          incomeActualCents: c.incomeActualCents,
+          expenseActualCents: c.expenseActualCents,
+          netActualCents: c.netActualCents,
+          trackedMonthCount: c.trackedMonthCount,
+        }))
+      : years.map((y) => ({
+          yearId: y.id,
+          yearLabel: y.yearLabel,
+          incomeActualCents: y.incomeActualCents,
+          expenseActualCents: y.expenseNetActualCents,
+          netActualCents: y.netActualCents,
+          trackedMonthCount: y.trackedMonthCount,
+        }));
+
+  const calendarYearLabel = String(new Date().getFullYear());
+  const snapshotIsCurrentCalendarYear =
+    snapshot != null && snapshot.yearLabel === calendarYearLabel;
+
+  if (years.length === 0) {
+    // Brand-new file with zero scaffolded years (rare). Mirror the
+    // old empty-state language so users have one obvious next step.
+    return (
+      <div className="budget-dashboard">
+        {yearEndNudge && (
+          <YearEndNudge
+            sourceLabel={yearEndNudge.sourceLabel}
+            nextLabel={yearEndNudge.nextLabel}
+            onStart={onStartYearEndNudge}
+          />
+        )}
+        <section className="budget-dashboard-empty card">
+          <h2>Create your first year</h2>
+          <p className="muted">
+            This budget doesn't have any years yet. Add one to start
+            entering income and expenses.
+          </p>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onCreateYear}
+          >
+            <PlusIcon /> New year
+          </button>
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <div className="years-landing">
-      <header className="years-landing-head">
-        <h1>{workspaceName}</h1>
-        <p className="muted">
-          Pick a year to open, or add another to this file.
-        </p>
-      </header>
+    <div className="budget-dashboard">
       {yearEndNudge && (
         <YearEndNudge
           sourceLabel={yearEndNudge.sourceLabel}
@@ -1450,43 +1526,211 @@ function YearsLanding({
           onStart={onStartYearEndNudge}
         />
       )}
-      <ul className="years-landing-grid">
-        {years.map((y) => (
-          <li key={y.id}>
-            <button
-              type="button"
-              className="years-landing-card"
-              onClick={() => onSelectYear(y.id)}
-            >
-              <span className="years-landing-card-year">{y.yearLabel}</span>
-              <span className="years-landing-card-meta muted">
-                {y.trackedMonthCount === 0
-                  ? "No months tracked"
-                  : `${y.trackedMonthCount} ${
-                      y.trackedMonthCount === 1 ? "month" : "months"
-                    } tracked`}
-              </span>
-              <span className="years-landing-card-totals">
-                <span className="mini-label">Net</span>
-                <span className="num">{formatUsd(y.netActualCents, "rounded")}</span>
-              </span>
-            </button>
-          </li>
-        ))}
-        <li>
+
+      <section className="budget-dashboard-strip" aria-label="Years in this budget">
+        <div className="budget-dashboard-strip-grid">
+          {stripCards.map((c) => {
+            const isActive = c.yearId === currentYearId;
+            const cls = [
+              "budget-dashboard-strip-card",
+              isActive ? "is-active" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return (
+              <button
+                key={c.yearId}
+                type="button"
+                className={cls}
+                onClick={() => onSelectYear(c.yearId)}
+              >
+                <div className="budget-dashboard-strip-head">
+                  <span className="budget-dashboard-strip-label">
+                    {c.yearLabel}
+                  </span>
+                  <span className="budget-dashboard-strip-meta">
+                    {c.trackedMonthCount}{" "}
+                    {c.trackedMonthCount === 1 ? "month" : "months"}
+                  </span>
+                </div>
+                <dl className="budget-dashboard-strip-stats">
+                  <dt>Income</dt>
+                  <dd className="num">
+                    {formatUsd(c.incomeActualCents, "rounded")}
+                  </dd>
+                  <dt>Expenses</dt>
+                  <dd className="num">
+                    {formatUsd(c.expenseActualCents, "rounded")}
+                  </dd>
+                  <dt>Net</dt>
+                  <dd
+                    className={`num ${varianceClassExpense(c.netActualCents)}`}
+                  >
+                    {formatUsd(c.netActualCents, "rounded")}
+                  </dd>
+                </dl>
+              </button>
+            );
+          })}
           <button
             type="button"
-            className="years-landing-card add"
+            className="budget-dashboard-strip-card is-add"
             onClick={onCreateYear}
           >
-            <span className="years-landing-card-year">+ New year</span>
-            <span className="years-landing-card-meta muted">
-              Adds Jan–Dec to this budget.
+            <span className="budget-dashboard-strip-add-mark">+</span>
+            <span className="budget-dashboard-strip-label">New year</span>
+            <span className="budget-dashboard-strip-meta">
+              Adds Jan–Dec to this file
             </span>
           </button>
-        </li>
-      </ul>
+        </div>
+        {crossYearLoading && stripCards.length === 0 && (
+          <p className="muted">Loading year totals…</p>
+        )}
+      </section>
+
+      {snapshot && currentYearId != null ? (
+        <BudgetDashboardSnapshot
+          overview={snapshot}
+          isCurrentCalendarYear={snapshotIsCurrentCalendarYear}
+          onOpenMonth={onOpenMonth}
+          onOpenYear={() => onSelectYear(currentYearId)}
+        />
+      ) : snapshotLoading ? (
+        <section className="card budget-dashboard-snapshot is-loading">
+          <p className="muted">Loading snapshot…</p>
+        </section>
+      ) : null}
+
+      <div className="budget-dashboard-actions">
+        {years.length > 1 && (
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={onShowCrossYear}
+          >
+            Compare all years…
+          </button>
+        )}
+      </div>
     </div>
+  );
+}
+
+// Snapshot card for the dashboard's "current" year — pulls from the
+// existing YearOverview shape so we get the same income/expense/net
+// numbers as the dedicated year-overview screen, plus a thin
+// month-by-month strip for at-a-glance trends.
+function BudgetDashboardSnapshot({
+  overview,
+  isCurrentCalendarYear,
+  onOpenMonth,
+  onOpenYear,
+}: {
+  overview: YearOverview;
+  isCurrentCalendarYear: boolean;
+  onOpenMonth: (id: number) => void;
+  onOpenYear: () => void;
+}) {
+  const incomeActual = overview.incomeActualCents;
+  const expensesActual = overview.expenseNetActualCents;
+  const net = incomeActual - expensesActual;
+
+  // Tracked months drive both the meta line and the visual emphasis
+  // of the month strip — months without activity render as faint
+  // outlines so the user can see where data is missing.
+  const trackedMonths = overview.months.filter(
+    (m) => m.incomeActualCents !== 0 || m.expenseNetActualCents !== 0,
+  );
+  const trackedCount = trackedMonths.length;
+
+  // Bar height is normalized to the largest absolute monthly net so
+  // both directions (surplus and deficit) get visible bars without
+  // one outlier flattening everything else.
+  const peakNet = overview.months.reduce(
+    (max, m) => Math.max(max, Math.abs(m.netActualCents)),
+    0,
+  );
+
+  return (
+    <section className="card budget-dashboard-snapshot">
+      <header className="budget-dashboard-snapshot-head">
+        <div>
+          <span className="mini-label">
+            {isCurrentCalendarYear ? "This year" : "Most recent year"}
+          </span>
+          <button
+            type="button"
+            className="btn-link budget-dashboard-snapshot-title"
+            onClick={onOpenYear}
+            title={`Open ${overview.yearLabel} overview`}
+          >
+            {overview.yearLabel}
+          </button>
+        </div>
+        <span className="muted budget-dashboard-snapshot-meta">
+          {trackedCount} {trackedCount === 1 ? "month" : "months"} tracked
+        </span>
+      </header>
+
+      <dl className="budget-dashboard-snapshot-stats">
+        <div>
+          <dt>Income</dt>
+          <dd className="num">{formatUsd(incomeActual, "rounded")}</dd>
+        </div>
+        <div>
+          <dt>Expenses</dt>
+          <dd className="num">{formatUsd(expensesActual, "rounded")}</dd>
+        </div>
+        <div>
+          <dt>Net</dt>
+          <dd className={`num ${varianceClassExpense(net)}`}>
+            {formatUsd(net, "rounded")}
+          </dd>
+        </div>
+      </dl>
+
+      {overview.months.length > 0 && (
+        <div className="budget-dashboard-month-strip" role="list">
+          {overview.months.map((m) => {
+            const isTracked =
+              m.incomeActualCents !== 0 || m.expenseNetActualCents !== 0;
+            const ratio =
+              peakNet === 0 ? 0 : Math.abs(m.netActualCents) / peakNet;
+            // Bars max at 36px tall, min visible bar is 2px so even a
+            // tracked month with $0 net still shows a faint anchor.
+            const barHeight = isTracked
+              ? Math.max(2, Math.round(ratio * 36))
+              : 0;
+            const direction = m.netActualCents >= 0 ? "up" : "down";
+            const cls = [
+              "budget-dashboard-month-cell",
+              isTracked ? "is-tracked" : "is-empty",
+              direction === "down" ? "is-deficit" : "is-surplus",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return (
+              <button
+                key={m.monthId}
+                type="button"
+                role="listitem"
+                className={cls}
+                onClick={() => onOpenMonth(m.monthId)}
+                title={`${m.label} — ${formatUsd(m.netActualCents, "rounded")} net`}
+                aria-label={`Open ${m.label}`}
+              >
+                <span
+                  className="budget-dashboard-month-bar"
+                  style={{ height: `${barHeight}px` }}
+                />
+                <span className="budget-dashboard-month-label">{m.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -4709,6 +4953,11 @@ export default function App() {
   const [reportsInitial, setReportsInitial] = useState<ReportsViewSeed | null>(null);
   const [crossYear, setCrossYear] = useState<CrossYearOverview | null>(null);
   const [crossYearLoading, setCrossYearLoading] = useState(false);
+  // Loading flag for the years-landing dashboard's snapshot card
+  // (separate from yearOverview so the snapshot fetch doesn't blank
+  // the year-overview screen when the user toggles between views).
+  const [dashboardSnapshotLoading, setDashboardSnapshotLoading] =
+    useState(false);
 
   // Launcher views are the home screen and the library browser. They
   // exist outside of any specific budget — no DB connection, no
@@ -5147,6 +5396,47 @@ export default function App() {
     }
   }, []);
 
+  // Picks the year the dashboard snapshot focuses on. Prefers the
+  // calendar year if it exists in this budget, otherwise falls back
+  // to the most-recent year (list_years sorts year_label DESC).
+  const dashboardCurrentYearId = useMemo<number | null>(() => {
+    if (years.length === 0) return null;
+    const cal = String(new Date().getFullYear());
+    const match = years.find((y) => y.yearLabel === cal);
+    return (match ?? years[0]).id;
+  }, [years]);
+
+  // When the user lands on / re-enters the dashboard, refresh both
+  // the cross-year totals (powers the year-picker strip) and the
+  // current-year snapshot (powers the lower card). We refetch on
+  // every entry so the dashboard reflects edits made in any year
+  // the user has been bouncing through.
+  useEffect(() => {
+    if (view.kind !== "years-landing") return;
+    void refreshCrossYear();
+    if (dashboardCurrentYearId == null) {
+      setYearOverview(null);
+      return;
+    }
+    let cancelled = false;
+    setDashboardSnapshotLoading(true);
+    invoke<YearOverview>("get_year_overview", {
+      yearId: dashboardCurrentYearId,
+    })
+      .then((o) => {
+        if (!cancelled) setYearOverview(o);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setDashboardSnapshotLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view.kind, dashboardCurrentYearId, refreshCrossYear]);
+
   const showCrossYear = useCallback(async () => {
     setError(null);
     setYtdDrawer(null);
@@ -5327,6 +5617,20 @@ export default function App() {
     setYearOverview(null);
     setView({ kind: "years-landing" });
   }, []);
+
+  // Dashboard "open month" needs to first enter the snapshot year so
+  // the sidebar months list, year overview state, and active year id
+  // all line up — otherwise activateMonth would land on a month
+  // that isn't reflected in the sidebar.
+  const openMonthFromDashboard = useCallback(
+    async (monthId: number) => {
+      const yid = dashboardCurrentYearId;
+      if (yid == null) return;
+      await enterYear(yid);
+      await activateMonth(monthId);
+    },
+    [dashboardCurrentYearId, enterYear, activateMonth],
+  );
 
   const onCreateYearSubmit = useCallback(
     async (label: string) => {
@@ -6526,11 +6830,17 @@ export default function App() {
           )}
 
           {view.kind === "years-landing" && (
-            <YearsLanding
+            <BudgetDashboard
               years={years}
+              crossYear={crossYear}
+              crossYearLoading={crossYearLoading}
+              snapshot={yearOverview}
+              snapshotLoading={dashboardSnapshotLoading}
+              currentYearId={dashboardCurrentYearId}
               onSelectYear={(id) => void enterYear(id)}
               onCreateYear={onCreateYear}
-              workspaceName={workspaceBasename}
+              onShowCrossYear={() => void showCrossYear()}
+              onOpenMonth={(id) => void openMonthFromDashboard(id)}
               yearEndNudge={
                 yearEndNudge
                   ? {
