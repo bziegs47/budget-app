@@ -1106,9 +1106,7 @@ function Sidebar({
   onSelectYear,
   onBackToYears,
   onShowYearOverview,
-  onShowCrossYear,
   onActivateMonth,
-  onCreateYear,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -1122,9 +1120,7 @@ function Sidebar({
   onSelectYear: (id: number) => void;
   onBackToYears: () => void;
   onShowYearOverview: (id: number) => void;
-  onShowCrossYear: () => void;
   onActivateMonth: (id: number) => void;
-  onCreateYear: () => void;
 }) {
   if (collapsed) {
     return (
@@ -1163,43 +1159,26 @@ function Sidebar({
             type="button"
             className="sidebar-back"
             onClick={onBackToYears}
-            title="Back to all years"
-            aria-label="Back to all years"
+            title="Back to dashboard"
+            aria-label="Back to dashboard"
           >
-            ‹ Years
+            ‹ Dashboard
           </button>
         ) : (
-          <h3 className="sidebar-section-title sidebar-eyebrow-title">Years</h3>
+          <h3 className="sidebar-section-title sidebar-eyebrow-title">Go to year</h3>
         )}
       </div>
 
       <div className="sidebar-scroll">
       {!activeYear && (
         <div className="sidebar-section">
-          {years.length > 1 && (
-            <ul className="sidebar-month-list">
-              <li
-                className={`sidebar-month-row ${
-                  view.kind === "cross-year" ? "active" : ""
-                }`}
-              >
-                <button
-                  type="button"
-                  className="sidebar-month-main"
-                  onClick={onShowCrossYear}
-                  title="Compare all years in this budget"
-                >
-                  <span className="sidebar-month-label">
-                    All years in this budget
-                  </span>
-                </button>
-              </li>
-            </ul>
-          )}
+          {/* Sidebar is navigation-only on the dashboard. Cross-year
+              comparison + "New year" both live in the dashboard's
+              own actions to avoid duplicating commands here. */}
           <ul className="sidebar-year-list">
             {years.length === 0 && (
               <li className="sidebar-empty muted">
-                No years yet — create your first below.
+                No years yet — add one from the dashboard.
               </li>
             )}
             {years.map((y) => (
@@ -1211,11 +1190,6 @@ function Sidebar({
               />
             ))}
           </ul>
-          <div className="sidebar-section-actions">
-            <button type="button" className="sidebar-action" onClick={onCreateYear}>
-              <PlusIcon /> New year
-            </button>
-          </div>
         </div>
       )}
 
@@ -1248,9 +1222,13 @@ function Sidebar({
               </li>
             </ul>
             <h3 className="sidebar-section-title">Months</h3>
+            {/* Every year is scaffolded with Jan–Dec, so we just
+                sort by calendar position. The data model still allows
+                non-calendar rows but there's no UI path to create
+                them; if a legacy file somehow has any, they'll sort
+                to the end via the `?? 99` fallback. */}
             <ul className="sidebar-month-list nested">
-              {months
-                .filter((m) => m.calendarMonth != null)
+              {[...months]
                 .sort(
                   (a, b) => (a.calendarMonth ?? 99) - (b.calendarMonth ?? 99),
                 )
@@ -1263,23 +1241,6 @@ function Sidebar({
                   />
                 ))}
             </ul>
-            {months.some((m) => m.calendarMonth == null) && (
-              <>
-                <h3 className="sidebar-section-title subtle">Custom periods</h3>
-                <ul className="sidebar-month-list nested">
-                  {months
-                    .filter((m) => m.calendarMonth == null)
-                    .map((m) => (
-                      <MonthRowItem
-                        key={m.id}
-                        row={m}
-                        active={view.kind === "month" && view.monthId === m.id}
-                        onActivate={() => onActivateMonth(m.id)}
-                      />
-                    ))}
-                </ul>
-              </>
-            )}
           </div>
         </>
       )}
@@ -1427,29 +1388,47 @@ function YearEndNudge({
 // of a wall of identical cards. Reuses existing IPC — no backend
 // changes — and intentionally leaves the sidebar alone.
 function BudgetDashboard({
+  workspaceTitle,
   years,
   crossYear,
   crossYearLoading,
   snapshot,
   snapshotLoading,
-  currentYearId,
-  onSelectYear,
+  selectedYearId,
+  onPickYear,
+  onOpenYearOverview,
+  onOpenMonth,
   onCreateYear,
   onShowCrossYear,
-  onOpenMonth,
   yearEndNudge,
   onStartYearEndNudge,
 }: {
+  // Same string the sidebar shows in its workspace eyebrow. Surfacing
+  // it in the dashboard header gives the user a quick reminder of
+  // *which* budget this dashboard is for, parallel to the library's
+  // "From <folder>" subtitle.
+  workspaceTitle: string;
   years: YearRow[];
   crossYear: CrossYearOverview | null;
   crossYearLoading: boolean;
   snapshot: YearOverview | null;
   snapshotLoading: boolean;
-  currentYearId: number | null;
-  onSelectYear: (id: number) => void;
+  // The year currently displayed in the snapshot card. Drives the
+  // "is-active" highlight on the year-totals strip too.
+  selectedYearId: number | null;
+  // Year-card click. Swaps the snapshot in-place; deliberately does
+  // not navigate, so the dashboard stays the per-year report and
+  // monthly navigation lives only in the sidebar.
+  onPickYear: (id: number) => void;
+  // Drill-down from the snapshot title to the more detailed
+  // year-overview screen (planned vs. actual per bucket).
+  onOpenYearOverview: (id: number) => void;
+  // Quick-switch from a month cell in the snapshot strip into that
+  // month's data-entry screen. The sidebar is still the canonical
+  // month nav; this is a shortcut, not a replacement.
+  onOpenMonth: (monthId: number) => void;
   onCreateYear: () => void;
   onShowCrossYear: () => void;
-  onOpenMonth: (id: number) => void;
   yearEndNudge: { sourceLabel: string; nextLabel: string } | null;
   onStartYearEndNudge: () => void;
 }) {
@@ -1464,34 +1443,120 @@ function BudgetDashboard({
     netActualCents: number;
     trackedMonthCount: number;
   };
-  const stripCards: StripCard[] =
-    crossYear && crossYear.columns.length > 0
-      ? crossYear.columns.map((c) => ({
-          yearId: c.yearId,
-          yearLabel: c.yearLabel,
-          incomeActualCents: c.incomeActualCents,
-          expenseActualCents: c.expenseActualCents,
-          netActualCents: c.netActualCents,
-          trackedMonthCount: c.trackedMonthCount,
-        }))
-      : years.map((y) => ({
-          yearId: y.id,
-          yearLabel: y.yearLabel,
-          incomeActualCents: y.incomeActualCents,
-          expenseActualCents: y.expenseNetActualCents,
-          netActualCents: y.netActualCents,
-          trackedMonthCount: y.trackedMonthCount,
-        }));
+  // Memoized so downstream `yearPages` / scroll effects don't see a
+  // brand-new array on every render. Without this, the auto-anchor
+  // effect below re-fires constantly and yanks the scroller back to
+  // the selected year's page — making chevrons and manual scroll
+  // both look like they snap back to page one.
+  const stripCards: StripCard[] = useMemo(
+    () =>
+      crossYear && crossYear.columns.length > 0
+        ? crossYear.columns.map((c) => ({
+            yearId: c.yearId,
+            yearLabel: c.yearLabel,
+            incomeActualCents: c.incomeActualCents,
+            expenseActualCents: c.expenseActualCents,
+            netActualCents: c.netActualCents,
+            trackedMonthCount: c.trackedMonthCount,
+          }))
+        : years.map((y) => ({
+            yearId: y.id,
+            yearLabel: y.yearLabel,
+            incomeActualCents: y.incomeActualCents,
+            expenseActualCents: y.expenseNetActualCents,
+            netActualCents: y.netActualCents,
+            trackedMonthCount: y.trackedMonthCount,
+          })),
+    [crossYear, years],
+  );
 
   const calendarYearLabel = String(new Date().getFullYear());
   const snapshotIsCurrentCalendarYear =
     snapshot != null && snapshot.yearLabel === calendarYearLabel;
+
+  // Year strip pagination. We keep the 4-col × 2-row layout the user
+  // dialed in, so each "page" holds up to 8 year cards. "+ New year"
+  // and "Compare all years" both live in the strip's actions row
+  // above the grid, so the grid itself is pure year cards.
+  const YEARS_PER_PAGE = 8;
+  const yearPages = useMemo(() => {
+    if (stripCards.length === 0) return [[] as StripCard[]];
+    const out: StripCard[][] = [];
+    for (let i = 0; i < stripCards.length; i += YEARS_PER_PAGE) {
+      out.push(stripCards.slice(i, i + YEARS_PER_PAGE));
+    }
+    return out;
+  }, [stripCards]);
+  const pageCount = yearPages.length;
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Per-page DOM refs so the scroll math reads each page's actual
+  // `offsetLeft` instead of multiplying clientWidth × pageIdx.
+  // clientWidth is rounded to integer pixels while flex layout
+  // positions pages at fractional pixels — multiplying drifts by
+  // sub-pixels per page, leaving a visible sliver of the previous
+  // page on later pages.
+  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [currentPage, setCurrentPage] = useState(0);
+  // Tracks the last selectedYearId we auto-scrolled to. We only
+  // anchor the scroller when the selection actually changes — never
+  // on every render — so the user's manual scroll position and
+  // chevron clicks aren't reset by unrelated re-renders.
+  const lastAnchoredYearRef = useRef<number | null>(null);
+
+  // Auto-scroll to the page containing `selectedYearId` whenever the
+  // selection changes (initial mount included). Instant placement —
+  // animation is reserved for chevron clicks.
+  useEffect(() => {
+    if (selectedYearId == null) return;
+    if (lastAnchoredYearRef.current === selectedYearId) return;
+    const idx = yearPages.findIndex((page) =>
+      page.some((c) => c.yearId === selectedYearId),
+    );
+    if (idx < 0) return;
+    lastAnchoredYearRef.current = selectedYearId;
+    setCurrentPage(idx);
+    const el = scrollerRef.current;
+    const pageEl = pageRefs.current[idx];
+    if (!el || !pageEl) return;
+    el.scrollLeft = pageEl.offsetLeft;
+  }, [selectedYearId, yearPages]);
+
+  // Track the active page from scroll position so prev/next state
+  // stays accurate when the user swipes/wheels the scroller. We pick
+  // the page whose offsetLeft is closest to the current scrollLeft —
+  // more accurate than clientWidth-based math for the same subpixel
+  // reason described above on the auto-anchor effect.
+  const onStripScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const x = el.scrollLeft;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    pageRefs.current.forEach((pageEl, i) => {
+      if (!pageEl) return;
+      const d = Math.abs(pageEl.offsetLeft - x);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    });
+    setCurrentPage((prev) => (prev === bestIdx ? prev : bestIdx));
+  }, []);
+
+
+  const showPager = pageCount > 1;
 
   if (years.length === 0) {
     // Brand-new file with zero scaffolded years (rare). Mirror the
     // old empty-state language so users have one obvious next step.
     return (
       <div className="budget-dashboard">
+        <header className="budget-dashboard-header">
+          <div>
+            <h1>Dashboard</h1>
+            <p className="muted budget-dashboard-source">{workspaceTitle}</p>
+          </div>
+        </header>
         {yearEndNudge && (
           <YearEndNudge
             sourceLabel={yearEndNudge.sourceLabel}
@@ -1519,6 +1584,12 @@ function BudgetDashboard({
 
   return (
     <div className="budget-dashboard">
+      <header className="budget-dashboard-header">
+        <div>
+          <h1>Dashboard</h1>
+          <p className="muted budget-dashboard-source">{workspaceTitle}</p>
+        </div>
+      </header>
       {yearEndNudge && (
         <YearEndNudge
           sourceLabel={yearEndNudge.sourceLabel}
@@ -1528,91 +1599,123 @@ function BudgetDashboard({
       )}
 
       <section className="budget-dashboard-strip" aria-label="Years in this budget">
-        <div className="budget-dashboard-strip-grid">
-          {stripCards.map((c) => {
-            const isActive = c.yearId === currentYearId;
-            const cls = [
-              "budget-dashboard-strip-card",
-              isActive ? "is-active" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <button
-                key={c.yearId}
-                type="button"
-                className={cls}
-                onClick={() => onSelectYear(c.yearId)}
-              >
-                <div className="budget-dashboard-strip-head">
-                  <span className="budget-dashboard-strip-label">
-                    {c.yearLabel}
-                  </span>
-                  <span className="budget-dashboard-strip-meta">
-                    {c.trackedMonthCount}{" "}
-                    {c.trackedMonthCount === 1 ? "month" : "months"}
-                  </span>
-                </div>
-                <dl className="budget-dashboard-strip-stats">
-                  <dt>Income</dt>
-                  <dd className="num">
-                    {formatUsd(c.incomeActualCents, "rounded")}
-                  </dd>
-                  <dt>Expenses</dt>
-                  <dd className="num">
-                    {formatUsd(c.expenseActualCents, "rounded")}
-                  </dd>
-                  <dt>Net</dt>
-                  <dd
-                    className={`num ${varianceClassExpense(c.netActualCents)}`}
-                  >
-                    {formatUsd(c.netActualCents, "rounded")}
-                  </dd>
-                </dl>
-              </button>
-            );
-          })}
+        <div className="budget-dashboard-strip-actions">
+          {years.length > 1 && (
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={onShowCrossYear}
+            >
+              Compare all years…
+            </button>
+          )}
           <button
             type="button"
-            className="budget-dashboard-strip-card is-add"
+            className="btn primary"
             onClick={onCreateYear}
           >
-            <span className="budget-dashboard-strip-add-mark">+</span>
-            <span className="budget-dashboard-strip-label">New year</span>
-            <span className="budget-dashboard-strip-meta">
-              Adds Jan–Dec to this file
-            </span>
+            New year
           </button>
         </div>
+        <div className="budget-dashboard-strip-pager">
+          <div
+            className="budget-dashboard-strip-scroller"
+            ref={scrollerRef}
+            onScroll={onStripScroll}
+          >
+            {yearPages.map((page, pageIdx) => (
+              <div
+                key={pageIdx}
+                ref={(el) => {
+                  pageRefs.current[pageIdx] = el;
+                }}
+                className="budget-dashboard-strip-page"
+                role="group"
+                aria-label={`Years page ${pageIdx + 1} of ${pageCount}`}
+              >
+                {page.map((c) => {
+                  const isActive = c.yearId === selectedYearId;
+                  const cls = [
+                    "budget-dashboard-strip-card",
+                    isActive ? "is-active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <button
+                      key={c.yearId}
+                      type="button"
+                      className={cls}
+                      onClick={() => onPickYear(c.yearId)}
+                      aria-pressed={isActive}
+                    >
+                      <div className="budget-dashboard-strip-head">
+                        <span className="budget-dashboard-strip-label">
+                          {c.yearLabel}
+                        </span>
+                        <span className="budget-dashboard-strip-meta">
+                          {c.trackedMonthCount}{" "}
+                          {c.trackedMonthCount === 1 ? "month" : "months"}
+                        </span>
+                      </div>
+                      <dl className="budget-dashboard-strip-stats">
+                        <dt>Income</dt>
+                        <dd className="num">
+                          {formatUsd(c.incomeActualCents, "rounded")}
+                        </dd>
+                        <dt>Expenses</dt>
+                        <dd className="num">
+                          {formatUsd(c.expenseActualCents, "rounded")}
+                        </dd>
+                        <dt>Net</dt>
+                        <dd
+                          className={`num ${varianceClassExpense(c.netActualCents)}`}
+                        >
+                          {formatUsd(c.netActualCents, "rounded")}
+                        </dd>
+                      </dl>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+        {showPager && (
+          <div
+            className="budget-dashboard-strip-dots"
+            role="presentation"
+            aria-hidden="true"
+          >
+            {yearPages.map((_, i) => (
+              <span
+                key={i}
+                className={
+                  i === currentPage
+                    ? "budget-dashboard-strip-dot is-active"
+                    : "budget-dashboard-strip-dot"
+                }
+              />
+            ))}
+          </div>
+        )}
         {crossYearLoading && stripCards.length === 0 && (
           <p className="muted">Loading year totals…</p>
         )}
       </section>
 
-      {snapshot && currentYearId != null ? (
+      {snapshot && selectedYearId != null ? (
         <BudgetDashboardSnapshot
           overview={snapshot}
           isCurrentCalendarYear={snapshotIsCurrentCalendarYear}
+          onOpenYear={() => onOpenYearOverview(selectedYearId)}
           onOpenMonth={onOpenMonth}
-          onOpenYear={() => onSelectYear(currentYearId)}
         />
       ) : snapshotLoading ? (
         <section className="card budget-dashboard-snapshot is-loading">
           <p className="muted">Loading snapshot…</p>
         </section>
       ) : null}
-
-      <div className="budget-dashboard-actions">
-        {years.length > 1 && (
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={onShowCrossYear}
-          >
-            Compare all years…
-          </button>
-        )}
-      </div>
     </div>
   );
 }
@@ -1624,13 +1727,20 @@ function BudgetDashboard({
 function BudgetDashboardSnapshot({
   overview,
   isCurrentCalendarYear,
-  onOpenMonth,
   onOpenYear,
+  onOpenMonth,
 }: {
   overview: YearOverview;
   isCurrentCalendarYear: boolean;
-  onOpenMonth: (id: number) => void;
+  // Drill-down to the per-year overview screen. The snapshot is the
+  // dashboard's quick view; the year-overview screen is the more
+  // detailed planned-vs-actual report.
   onOpenYear: () => void;
+  // Quick-switch into a specific month's data-entry screen. Sidebar
+  // also covers this nav, but the month strip doubles as a glanceable
+  // shortcut so users can jump straight from "I see April is off" to
+  // editing April.
+  onOpenMonth: (id: number) => void;
 }) {
   const incomeActual = overview.incomeActualCents;
   const expensesActual = overview.expenseNetActualCents;
@@ -1656,9 +1766,12 @@ function BudgetDashboardSnapshot({
     <section className="card budget-dashboard-snapshot">
       <header className="budget-dashboard-snapshot-head">
         <div>
-          <span className="mini-label">
-            {isCurrentCalendarYear ? "This year" : "Most recent year"}
-          </span>
+          {/* Eyebrow only renders when it's actually true; otherwise
+              it would lie as soon as the user picks a non-calendar
+              year from the strip above. */}
+          {isCurrentCalendarYear && (
+            <span className="mini-label">This year</span>
+          )}
           <button
             type="button"
             className="btn-link budget-dashboard-snapshot-title"
@@ -1691,6 +1804,10 @@ function BudgetDashboardSnapshot({
       </dl>
 
       {overview.months.length > 0 && (
+        // Quick-switch shortcut into a specific month. The sidebar is
+        // still the canonical month nav; the strip doubles as an
+        // at-a-glance trend that's also clickable so the user can
+        // jump straight from "April looks off" to editing April.
         <div className="budget-dashboard-month-strip" role="list">
           {overview.months.map((m) => {
             const isTracked =
@@ -1717,7 +1834,7 @@ function BudgetDashboardSnapshot({
                 role="listitem"
                 className={cls}
                 onClick={() => onOpenMonth(m.monthId)}
-                title={`${m.label} — ${formatUsd(m.netActualCents, "rounded")} net`}
+                title={`Open ${m.label} — ${formatUsd(m.netActualCents, "rounded")} net`}
                 aria-label={`Open ${m.label}`}
               >
                 <span
@@ -3788,7 +3905,6 @@ function PreferencesModal({
 function CreateYearModal({
   open,
   mode,
-  defaultYear,
   busy,
   existingLabels,
   onCancel,
@@ -3796,7 +3912,6 @@ function CreateYearModal({
 }: {
   open: boolean;
   mode: "budget" | "year";
-  defaultYear: number;
   busy: boolean;
   existingLabels: string[];
   onCancel: () => void;
@@ -3805,16 +3920,18 @@ function CreateYearModal({
   const isBudgetMode = mode === "budget";
   // Budget mode is the "name a multi-year workspace" flow, so we leave
   // the field blank instead of seeding it with this year's number;
-  // year mode still prefills with the suggested next year so the
-  // common case (just hit Enter) keeps working.
-  const [label, setLabel] = useState(isBudgetMode ? "" : String(defaultYear));
+  // Both modes start blank. Pre-filling the year would commit the
+  // user to whatever default we picked (today's year) before they've
+  // even read the field — surprising when they actually want a past
+  // or future year. The placeholder still hints the expected shape.
+  const [label, setLabel] = useState("");
   const [touched, setTouched] = useState(false);
   useEffect(() => {
     if (open) {
-      setLabel(isBudgetMode ? "" : String(defaultYear));
+      setLabel("");
       setTouched(false);
     }
-  }, [open, defaultYear, mode, isBudgetMode]);
+  }, [open, mode, isBudgetMode]);
   const trapRef = useModalFocusTrap<HTMLFormElement>(open && !busy, onCancel);
   if (!open) return null;
   const trimmed = label.trim();
@@ -4958,6 +5075,14 @@ export default function App() {
   // the year-overview screen when the user toggles between views).
   const [dashboardSnapshotLoading, setDashboardSnapshotLoading] =
     useState(false);
+  // User-driven year override for the dashboard snapshot. null means
+  // "follow the default" (calendar year if present, else most recent),
+  // computed below as `dashboardCurrentYearId`. Clicking a year card on
+  // the dashboard sets this; entering the dashboard view resets it so
+  // re-entry always lands on the default year.
+  const [dashboardSelectedYearId, setDashboardSelectedYearId] = useState<
+    number | null
+  >(null);
 
   // Launcher views are the home screen and the library browser. They
   // exist outside of any specific budget — no DB connection, no
@@ -5224,6 +5349,8 @@ export default function App() {
 
       // Backfill: ensure every existing year has all 12 calendar months. This is
       // a one-shot reconcile that legacy files (pre-v3) will benefit from.
+      // We still re-pull the years list afterward so any state derived
+      // from per-year metadata reflects the post-backfill shape.
       let yearList = initialYears;
       if (initialYears.length > 0) {
         for (const y of initialYears) {
@@ -5236,20 +5363,38 @@ export default function App() {
         yearList = await refreshYears();
       }
 
-      if (yearList.length === 0) {
-        // A real `.mimo` file with zero years (rare — fresh blank file).
-        // Drop the user on the per-budget years-landing rather than
-        // bouncing to home, since they explicitly opened this file.
-        setSidebarYearId(null);
-        setMonths([]);
-        setView({ kind: "years-landing" });
+      // Dashboard is the canonical per-budget landing page. Even when
+      // years exist we drop the user there first so they see the
+      // overview snapshot and can pick which year to enter from the
+      // sidebar's "Go to year" list. This also means a freshly
+      // opened budget never auto-loads a year's months — the user
+      // chooses their entry point explicitly. Year-scoped state is
+      // cleared so a stale year/month doesn't bleed across budgets.
+      setSidebarYearId(null);
+      sidebarYearIdRef.current = null;
+      setMonths([]);
+
+      // Pre-populate the dashboard snapshot for the default year so
+      // the page never lands blank. The default mirrors
+      // `dashboardCurrentYearId`: prefer the calendar year if it's in
+      // this budget, otherwise the most recent. The dashboard's own
+      // refresh effect will still re-fetch on view re-entry.
+      if (yearList.length > 0) {
+        const calLabel = String(new Date().getFullYear());
+        const target =
+          yearList.find((y) => y.yearLabel === calLabel) ?? yearList[0];
+        try {
+          await refreshOverview(target.id);
+        } catch {
+          // Snapshot is non-critical for landing; the dashboard's own
+          // effect will retry on mount and surface real errors there.
+          setYearOverview(null);
+        }
       } else {
-        const firstYear = yearList[0];
-        setSidebarYearId(firstYear.id);
-        await refreshMonths(firstYear.id);
-        await refreshOverview(firstYear.id);
-        setView({ kind: "year-overview", yearId: firstYear.id });
+        setYearOverview(null);
       }
+
+      setView({ kind: "years-landing" });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -5257,9 +5402,8 @@ export default function App() {
     }
   }, [
     refreshYears,
-    refreshMonths,
-    refreshSettings,
     refreshOverview,
+    refreshSettings,
     refreshLibrary,
     refreshWorkspaceMeta,
   ]);
@@ -5396,9 +5540,9 @@ export default function App() {
     }
   }, []);
 
-  // Picks the year the dashboard snapshot focuses on. Prefers the
-  // calendar year if it exists in this budget, otherwise falls back
-  // to the most-recent year (list_years sorts year_label DESC).
+  // Default year for the dashboard snapshot. Prefers the calendar
+  // year if it exists in this budget, otherwise falls back to the
+  // most-recent year (list_years sorts year_label DESC).
   const dashboardCurrentYearId = useMemo<number | null>(() => {
     if (years.length === 0) return null;
     const cal = String(new Date().getFullYear());
@@ -5406,22 +5550,58 @@ export default function App() {
     return (match ?? years[0]).id;
   }, [years]);
 
+  // Effective year shown in the snapshot card. Honours the user's
+  // last click on a year card if that year still exists; otherwise
+  // falls back to the default. This keeps the dashboard usable when
+  // a year is renamed/deleted out from under the selection.
+  const effectiveDashboardYearId = useMemo<number | null>(() => {
+    if (
+      dashboardSelectedYearId != null &&
+      years.some((y) => y.id === dashboardSelectedYearId)
+    ) {
+      return dashboardSelectedYearId;
+    }
+    return dashboardCurrentYearId;
+  }, [dashboardSelectedYearId, dashboardCurrentYearId, years]);
+
+  // Mirror into a ref so quick-switch handlers (e.g. opening a month
+  // from the dashboard's snapshot strip) can read the current value
+  // without forcing a callback rebuild every time the selection
+  // changes.
+  const effectiveDashboardYearIdRef = useRef<number | null>(
+    effectiveDashboardYearId,
+  );
+  useEffect(() => {
+    effectiveDashboardYearIdRef.current = effectiveDashboardYearId;
+  }, [effectiveDashboardYearId]);
+
+  // Reset the user override every time we enter the dashboard so a
+  // fresh visit always shows the default year. Without this, picking
+  // 2025 then leaving via the sidebar and coming back would still
+  // show 2025 even though the dashboard's "default focus" is the
+  // calendar year.
+  useEffect(() => {
+    if (view.kind !== "years-landing") return;
+    setDashboardSelectedYearId(null);
+  }, [view.kind]);
+
   // When the user lands on / re-enters the dashboard, refresh both
   // the cross-year totals (powers the year-picker strip) and the
-  // current-year snapshot (powers the lower card). We refetch on
-  // every entry so the dashboard reflects edits made in any year
-  // the user has been bouncing through.
+  // selected-year snapshot (powers the lower card). We refetch on
+  // every entry and on every year-card click so the dashboard
+  // reflects edits made in any year the user has been bouncing
+  // through.
   useEffect(() => {
     if (view.kind !== "years-landing") return;
     void refreshCrossYear();
-    if (dashboardCurrentYearId == null) {
+    if (effectiveDashboardYearId == null) {
       setYearOverview(null);
       return;
     }
     let cancelled = false;
     setDashboardSnapshotLoading(true);
     invoke<YearOverview>("get_year_overview", {
-      yearId: dashboardCurrentYearId,
+      yearId: effectiveDashboardYearId,
     })
       .then((o) => {
         if (!cancelled) setYearOverview(o);
@@ -5435,7 +5615,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [view.kind, dashboardCurrentYearId, refreshCrossYear]);
+  }, [view.kind, effectiveDashboardYearId, refreshCrossYear]);
 
   const showCrossYear = useCallback(async () => {
     setError(null);
@@ -5618,18 +5798,21 @@ export default function App() {
     setView({ kind: "years-landing" });
   }, []);
 
-  // Dashboard "open month" needs to first enter the snapshot year so
-  // the sidebar months list, year overview state, and active year id
-  // all line up — otherwise activateMonth would land on a month
-  // that isn't reflected in the sidebar.
+  // Quick-switch from the dashboard's snapshot month strip into the
+  // month's data-entry screen. The strip is always rendered for the
+  // dashboard's selected year, which may differ from whichever year
+  // is currently "entered" in the sidebar — so we enter that year
+  // first (no-op if already entered), then activate the month.
   const openMonthFromDashboard = useCallback(
     async (monthId: number) => {
-      const yid = dashboardCurrentYearId;
-      if (yid == null) return;
-      await enterYear(yid);
+      const yearId = effectiveDashboardYearIdRef.current;
+      if (yearId == null) return;
+      if (sidebarYearIdRef.current !== yearId) {
+        await enterYear(yearId);
+      }
       await activateMonth(monthId);
     },
-    [dashboardCurrentYearId, enterYear, activateMonth],
+    [enterYear, activateMonth],
   );
 
   const onCreateYearSubmit = useCallback(
@@ -6613,7 +6796,6 @@ export default function App() {
       <CreateYearModal
         open={createYearOpen}
         mode={createYearMode}
-        defaultYear={new Date().getFullYear()}
         busy={createYearBusy}
         existingLabels={yearLabels}
         onCancel={() => {
@@ -6716,9 +6898,7 @@ export default function App() {
           onShowYearOverview={(id) => {
             void enterYear(id);
           }}
-          onShowCrossYear={() => void showCrossYear()}
           onActivateMonth={(id) => void activateMonth(id)}
-          onCreateYear={onCreateYear}
         />
       )}
 
@@ -6736,38 +6916,56 @@ export default function App() {
             <span className="brand-tagline">Money In, Money Out | Mind the Flow</span>
           </button>
           <div className="top-bar-spacer" />
+          {/* Top-bar nav stays put across every view so users always
+              have the same orientation. Dashboard + Reports require an
+              open budget, so they're disabled (rather than hidden) on
+              launcher views — the slot stays put and the affordance
+              communicates "this exists, just not here yet". */}
           <button
             type="button"
             className="btn ghost"
             onClick={showHome}
+            aria-pressed={view.kind === "welcome"}
           >
             Home
           </button>
-          {/* Reports + Library both operate on the open budget. On
-              launcher views (home / library itself) they're suppressed
-              because either there's no budget context yet or the user
-              is already at the destination. The menu still exposes
-              both for keyboard-driven navigation. */}
-          {!isLauncherView && (
-            <>
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => void showReports()}
-                title="Calendar reports (⌘⇧R)"
-              >
-                Reports
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => void showLibrary()}
-                title="Browse all budgets"
-              >
-                Library
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={exitYear}
+            title={
+              isLauncherView
+                ? "Open a budget to see its dashboard"
+                : "Open this budget's dashboard"
+            }
+            aria-pressed={view.kind === "years-landing"}
+            disabled={isLauncherView}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => void showReports()}
+            title={
+              isLauncherView
+                ? "Open a budget to see its reports"
+                : "Calendar reports (⌘⇧R)"
+            }
+            aria-pressed={view.kind === "reports"}
+            disabled={isLauncherView}
+          >
+            Reports
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => void showLibrary()}
+            title="Browse all budgets"
+            aria-pressed={view.kind === "library"}
+          >
+            Library
+          </button>
           {/* Save / autosave status only makes sense inside an open
               budget. On launcher views there's nothing to save (the
               scratch backend isn't user-visible there), so we suppress
@@ -6831,16 +7029,20 @@ export default function App() {
 
           {view.kind === "years-landing" && (
             <BudgetDashboard
+              workspaceTitle={
+                isDefaultWorkspace ? "Untitled budget" : workspaceBasename
+              }
               years={years}
               crossYear={crossYear}
               crossYearLoading={crossYearLoading}
               snapshot={yearOverview}
               snapshotLoading={dashboardSnapshotLoading}
-              currentYearId={dashboardCurrentYearId}
-              onSelectYear={(id) => void enterYear(id)}
+              selectedYearId={effectiveDashboardYearId}
+              onPickYear={setDashboardSelectedYearId}
+              onOpenYearOverview={(id) => void enterYear(id)}
+              onOpenMonth={(id) => void openMonthFromDashboard(id)}
               onCreateYear={onCreateYear}
               onShowCrossYear={() => void showCrossYear()}
-              onOpenMonth={(id) => void openMonthFromDashboard(id)}
               yearEndNudge={
                 yearEndNudge
                   ? {
