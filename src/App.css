@@ -188,6 +188,10 @@ body {
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   border-radius: 8px;
   border: 1px solid var(--border);
   padding: 0.45rem 0.85rem;
@@ -195,6 +199,7 @@ body {
   cursor: pointer;
   background: var(--surface-2);
   color: var(--text);
+  line-height: 1.2;
 }
 
 .btn.primary {
@@ -1662,6 +1667,27 @@ body {
   padding-top: 0.5rem;
 }
 
+/* Title row at the top of the dashboard. Mirrors the library's
+   header so the two per-budget surfaces feel like siblings: a big
+   page title plus a quiet line of context underneath. */
+.budget-dashboard-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.budget-dashboard-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.budget-dashboard-source {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+}
+
 .budget-dashboard-empty {
   display: flex;
   flex-direction: column;
@@ -1688,10 +1714,100 @@ body {
   gap: 0.5rem;
 }
 
-.budget-dashboard-strip-grid {
+/* Action row above the year grid. Holds "Compare all years…" and
+   "+ New year" so the grid itself stays a clean wall of year cards
+   regardless of pagination state. Right-aligned so the primary
+   "+ New year" affordance sits at the top-right corner of the grid. */
+.budget-dashboard-strip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Paginated strip layout. The scroller holds N "page" children, each
+   one a fixed 4×2 grid that takes 100% of the visible width. CSS
+   scroll-snap turns mouse wheel / trackpad swipes into discrete
+   page turns. Navigation is wheel/swipe-only — page dots below the
+   strip indicate the user's position. */
+.budget-dashboard-strip-pager {
+  /* minmax(0, 1fr) is critical: a plain `1fr` resolves to
+     minmax(auto, 1fr), which lets the scroller's intrinsic content
+     (N × 100%-wide pages) push the column wider than its container.
+     The 0-min lets the grid clamp the column to whatever space is
+     actually available. */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.budget-dashboard-strip-scroller {
+  display: flex;
+  /* Small dead-zone between pages so the previous page's right card
+     border can't bleed (sub-pixel anti-aliasing) into the next
+     page's view. snap math uses each page's offsetLeft, so the gap
+     is accounted for automatically and the user never sees an empty
+     band — pages snap edge-to-edge. */
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Each child page is flex: 0 0 100%, so the scroller's intrinsic
+     width follows the available column width — no extra min-width
+     work needed. */
+}
+
+.budget-dashboard-strip-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* Page-position indicator. Sits below the strip, one dot per page,
+   active page is filled with accent. Read-only — doesn't accept
+   clicks (navigation is wheel/swipe-only by design). */
+.budget-dashboard-strip-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  padding-top: 0.45rem;
+}
+
+.budget-dashboard-strip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 180ms ease, transform 180ms ease;
+}
+
+.budget-dashboard-strip-dot.is-active {
+  background: var(--accent);
+  transform: scale(1.35);
+}
+
+.budget-dashboard-strip-page {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Pin two explicit rows at equal share of the page height. Without
+     this, a page with only one row's worth of cards (e.g. the last
+     page when years aren't a clean multiple of 8) would stretch its
+     single row to fill the page — making cards 2x as tall as on
+     other pages. The empty row stays empty rather than absorbing
+     space, so card heights stay consistent across all pages. */
+  grid-template-rows: repeat(2, 1fr);
   gap: 0.6rem;
+}
+
+/* Narrower windows: drop from 4×2 to 2×4 so cards stay readable
+   instead of squeezing below their comfortable width. Same 8 slots
+   per page, same pagination math — only the visual shape changes. */
+@media (max-width: 720px) {
+  .budget-dashboard-strip-page {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(4, 1fr);
+  }
 }
 
 .budget-dashboard-strip-card {
@@ -1713,7 +1829,10 @@ body {
 .budget-dashboard-strip-card:hover {
   border-color: var(--accent);
   background: var(--surface-3, var(--surface-2));
-  transform: translateY(-1px);
+  /* No translateY here — the scroller has overflow-x: auto, which
+     forces overflow-y to clip in the spec, so any lift would chop
+     the card's top edge. The border + background change is enough
+     hover feedback. */
 }
 
 .budget-dashboard-strip-card:focus-visible {
@@ -1725,19 +1844,6 @@ body {
 .budget-dashboard-strip-card.is-active {
   border-color: var(--accent);
   background: var(--surface-3, var(--surface-2));
-}
-
-.budget-dashboard-strip-card.is-add {
-  border-style: dashed;
-  background: transparent;
-  align-items: flex-start;
-  gap: 0.25rem;
-}
-
-.budget-dashboard-strip-add-mark {
-  font-size: 1.4rem;
-  font-weight: 600;
-  line-height: 1;
 }
 
 .budget-dashboard-strip-head {
@@ -1856,27 +1962,31 @@ body {
 }
 
 .budget-dashboard-month-cell {
+  /* Quick-switch into the month's data-entry screen. Sidebar still
+     owns the canonical month nav; the strip doubles as a clickable
+     trend so users can jump straight from the dashboard. */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
   gap: 0.3rem;
-  background: transparent;
-  border: 1px solid transparent;
   border-radius: 6px;
   padding: 0.35rem 0.15rem 0.3rem;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
   min-height: 56px;
-  transition: background 120ms ease, border-color 120ms ease;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .budget-dashboard-month-cell:hover,
 .budget-dashboard-month-cell:focus-visible {
+  background: var(--surface-strong, rgba(127, 127, 127, 0.08));
+  border-color: var(--border, rgba(127, 127, 127, 0.18));
   outline: none;
-  background: var(--surface-2);
-  border-color: var(--border);
 }
 
 .budget-dashboard-month-bar {
@@ -1905,12 +2015,6 @@ body {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.budget-dashboard-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 /* Library view */
