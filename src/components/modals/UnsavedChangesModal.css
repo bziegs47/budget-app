@@ -1,0 +1,8 @@
+.unsaved-changes-card {
+  width: min(460px, 92vw);
+}
+
+.unsaved-changes-actions {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
