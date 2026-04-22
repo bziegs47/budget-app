@@ -1762,14 +1762,61 @@ body {
   display: none;
 }
 
-/* Page-position indicator. Sits below the strip, one dot per page,
-   active page is filled with accent. Read-only — doesn't accept
-   clicks (navigation is wheel/swipe-only by design). */
+/* Pagination control row sits below the strip and contains
+   prev-chevron + page dots + next-chevron in a single horizontal
+   line. The dots remain decorative; the chevrons are the keyboard /
+   click affordance. Wheel/swipe scrolling continues to work
+   independently — chevrons are an additive convenience for users
+   who don't have horizontal scroll surfaces. */
+.budget-dashboard-strip-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding-top: 0.45rem;
+}
+
+.budget-dashboard-strip-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease,
+    border-color 120ms ease;
+  font: inherit;
+  line-height: 1;
+}
+
+.budget-dashboard-strip-chevron:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.budget-dashboard-strip-chevron:focus-visible {
+  outline: none;
+  color: var(--text);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft, rgba(60, 130, 246, 0.25));
+}
+
+.budget-dashboard-strip-chevron:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Dots row inside the pagination control. */
 .budget-dashboard-strip-dots {
   display: flex;
   justify-content: center;
   gap: 0.4rem;
-  padding-top: 0.45rem;
 }
 
 .budget-dashboard-strip-dot {
