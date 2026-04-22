@@ -1415,6 +1415,22 @@ function BudgetDashboard({
     setCurrentPage((prev) => (prev === bestIdx ? prev : bestIdx));
   }, []);
 
+  // Chevron click handler. Instant scroll (no behavior:"smooth") —
+  // scroll-snap-type:x mandatory plus smooth scrolling interact
+  // unpredictably in WebKit, occasionally aborting the animation
+  // mid-flight. Snap handles the visual settling cleanly on its own,
+  // and the dots already animate through their is-active state.
+  const goToStripPage = useCallback(
+    (idx: number) => {
+      const clamped = Math.max(0, Math.min(idx, yearPages.length - 1));
+      const el = scrollerRef.current;
+      const pageEl = pageRefs.current[clamped];
+      if (!el || !pageEl) return;
+      el.scrollLeft = pageEl.offsetLeft;
+      setCurrentPage(clamped);
+    },
+    [yearPages.length],
+  );
 
   const showPager = pageCount > 1;
 
@@ -1554,21 +1570,41 @@ function BudgetDashboard({
           </div>
         </div>
         {showPager && (
-          <div
-            className="budget-dashboard-strip-dots"
-            role="presentation"
-            aria-hidden="true"
-          >
-            {yearPages.map((_, i) => (
-              <span
-                key={i}
-                className={
-                  i === currentPage
-                    ? "budget-dashboard-strip-dot is-active"
-                    : "budget-dashboard-strip-dot"
-                }
-              />
-            ))}
+          <div className="budget-dashboard-strip-pagination">
+            <button
+              type="button"
+              className="budget-dashboard-strip-chevron"
+              onClick={() => goToStripPage(currentPage - 1)}
+              disabled={currentPage === 0}
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <div
+              className="budget-dashboard-strip-dots"
+              role="presentation"
+              aria-hidden="true"
+            >
+              {yearPages.map((_, i) => (
+                <span
+                  key={i}
+                  className={
+                    i === currentPage
+                      ? "budget-dashboard-strip-dot is-active"
+                      : "budget-dashboard-strip-dot"
+                  }
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              className="budget-dashboard-strip-chevron"
+              onClick={() => goToStripPage(currentPage + 1)}
+              disabled={currentPage === pageCount - 1}
+              aria-label="Next page"
+            >
+              ›
+            </button>
           </div>
         )}
         {crossYearLoading && stripCards.length === 0 && (
@@ -2199,6 +2235,21 @@ function CrossYearView({
   }, [data?.columns]);
   const showTotalsPager = totalsPages.length > 1;
 
+  // Same instant-scroll strategy as BudgetDashboard.goToStripPage —
+  // see notes there on why we deliberately avoid behavior:"smooth"
+  // alongside scroll-snap-type:mandatory.
+  const goToTotalsPage = useCallback(
+    (idx: number) => {
+      const clamped = Math.max(0, Math.min(idx, totalsPages.length - 1));
+      const el = totalsScrollerRef.current;
+      const pageEl = totalsPageRefs.current[clamped];
+      if (!el || !pageEl) return;
+      el.scrollLeft = pageEl.offsetLeft;
+      setCurrentTotalsPage(clamped);
+    },
+    [totalsPages.length],
+  );
+
   if (loading && !data) {
     return <p className="muted month-loading-banner">Crunching cross-year totals…</p>;
   }
@@ -2335,21 +2386,41 @@ function CrossYearView({
           </div>
         </div>
         {showTotalsPager && (
-          <div
-            className="budget-dashboard-strip-dots"
-            role="presentation"
-            aria-hidden="true"
-          >
-            {totalsPages.map((_, i) => (
-              <span
-                key={i}
-                className={
-                  i === currentTotalsPage
-                    ? "budget-dashboard-strip-dot is-active"
-                    : "budget-dashboard-strip-dot"
-                }
-              />
-            ))}
+          <div className="budget-dashboard-strip-pagination">
+            <button
+              type="button"
+              className="budget-dashboard-strip-chevron"
+              onClick={() => goToTotalsPage(currentTotalsPage - 1)}
+              disabled={currentTotalsPage === 0}
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <div
+              className="budget-dashboard-strip-dots"
+              role="presentation"
+              aria-hidden="true"
+            >
+              {totalsPages.map((_, i) => (
+                <span
+                  key={i}
+                  className={
+                    i === currentTotalsPage
+                      ? "budget-dashboard-strip-dot is-active"
+                      : "budget-dashboard-strip-dot"
+                  }
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              className="budget-dashboard-strip-chevron"
+              onClick={() => goToTotalsPage(currentTotalsPage + 1)}
+              disabled={currentTotalsPage === totalsPages.length - 1}
+              aria-label="Next page"
+            >
+              ›
+            </button>
           </div>
         )}
       </section>
