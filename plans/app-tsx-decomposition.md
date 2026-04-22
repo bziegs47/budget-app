@@ -1,11 +1,11 @@
 # `App.tsx` decomposition roadmap
 
-`src/App.tsx` is currently **~6,900 lines** and houses every concern in
-the renderer: icons, primitive form widgets, every modal, the sidebar,
-every view, the home dashboard, the library, IPC listeners, autosave,
-menu wiring, and the top-level `App` component. The file works, but
-the cost of any further feature is paid in scroll time and merge
-conflicts.
+`src/App.tsx` is currently **~7,570 lines** (post-Tier 0 baseline) and
+houses every concern in the renderer: icons, primitive form widgets,
+every modal, the sidebar, every view, the home dashboard, the library,
+IPC listeners, autosave, menu wiring, and the top-level `App`
+component. The file works, but the cost of any further feature is
+paid in scroll time and merge conflicts.
 
 This document is a **plan**, not a change. No code moves until each
 slice is scoped and reviewed on its own branch. The goal is to land
@@ -29,6 +29,14 @@ views."
    diffs noisy.
 5. **Lints and types stay green at every step.** Each extraction PR
    ends with `npx tsc --noEmit` and `npm run build` clean.
+6. **CSS co-locates with components.** When a component moves out of
+   `App.tsx`, any selectors used *only* by that component move with
+   it into a sibling `.css` file (e.g. `SaveStatusPill.tsx` +
+   `SaveStatusPill.css`). Selectors shared across components stay in
+   `src/App.css` until/unless we shard further. Per-component CSS is
+   imported at the top of the component file. We deliberately don't
+   introduce CSS modules or CSS-in-JS yet — plain `.css` siblings
+   keep the migration mechanical.
 
 ## Proposed target layout
 
@@ -123,6 +131,9 @@ known amount.
 - Move every `*Icon` function to `src/components/icons/*.tsx`.
 - Add a barrel `index.ts`.
 - Update imports in `App.tsx` and any other consumer.
+- Icons are pure SVG with no unique selectors, so the CSS
+  co-location convention (principle #6) has nothing to apply here.
+  Phase 2 (primitives) is its first real test.
 - **Risk:** essentially zero. Pure components, no state.
 
 ### Phase 2 — Primitive widgets (~700 LOC out)
@@ -217,24 +228,28 @@ known amount.
   switch can stay in `App.tsx`. That **is** the file's job.
 - One-shot helpers used only inside `App` (e.g. local memo
   derivations, tiny effect blocks) are fine where they are.
-- CSS continues to live in `src/App.css` until we decide whether
-  to per-component split it; that's a separate conversation.
+- Selectors not unique to an extracted component continue to live
+  in `src/App.css`. Per-component selectors co-locate with the
+  component (see principle #6).
 
 ## Milestone targets
 
+Baseline: ~7,570 lines (post-Tier 0). Per-phase deltas in each
+phase header above; cumulative targets below.
+
 | After phase | Target `App.tsx` LOC |
 | ---: | ---: |
-| 1 | ~6,750 |
-| 2 | ~6,050 |
-| 3 | ~5,750 |
-| 4 | ~4,850 |
-| 5 | ~4,600 |
-| 6 | ~3,400 |
-| 7 | ~2,500 |
-| 8 | ~2,300 |
-| 9 | ~1,700 |
+| 1 | ~7,420 |
+| 2 | ~6,720 |
+| 3 | ~6,420 |
+| 4 | ~5,520 |
+| 5 | ~5,270 |
+| 6 | ~4,070 |
+| 7 | ~3,170 |
+| 8 | ~2,970 |
+| 9 | ~2,370 |
 
-A ~1,700-line `App.tsx` whose surface is "state, IPC, view routing"
+A ~2,400-line `App.tsx` whose surface is "state, IPC, view routing"
 is a healthy place to stop. We can revisit further splits once the
 file's shape stabilizes.
 
