@@ -2225,58 +2225,43 @@ function CrossYearView({
 
       <section className="card">
         <h2>Year totals</h2>
+        {/* Cards mirror the dashboard year-strip card formatting so the
+            two surfaces read as one consistent vocabulary. Variance vs
+            plan lives in the matrices below; these are the headline
+            actuals at a glance. */}
         <div className="cross-year-totals">
-          {columns.map((c) => {
-            const incomeDelta = c.incomeActualCents - c.incomePlannedCents;
-            const expenseDelta = c.expensePlannedCents - c.expenseActualCents;
-            const netDelta = c.netActualCents - c.netPlannedCents;
-            return (
-              <button
-                type="button"
-                key={c.yearId}
-                className="cross-year-total-card"
-                onClick={() => onJumpToYear(c.yearId)}
-                title="Open year overview"
-              >
-                <div className="cross-year-total-head">
-                  <span className="cross-year-total-label">{c.yearLabel}</span>
-                  <span className="cross-year-total-meta">
-                    {c.trackedMonthCount}{" "}
-                    {c.trackedMonthCount === 1 ? "month" : "months"} tracked
-                  </span>
-                </div>
-                <dl className="cross-year-total-stats">
-                  <dt>Income</dt>
-                  <dd className="num">
-                    {formatUsd(c.incomeActualCents, "rounded")}
-                    <span
-                      className={`cross-year-delta ${varianceClassIncome(incomeDelta)}`}
-                    >
-                      {formatUsd(incomeDelta, "rounded")}
-                    </span>
-                  </dd>
-                  <dt>Net expenses</dt>
-                  <dd className="num">
-                    {formatUsd(c.expenseActualCents, "rounded")}
-                    <span
-                      className={`cross-year-delta ${varianceClassExpense(expenseDelta)}`}
-                    >
-                      {formatUsd(expenseDelta, "rounded")}
-                    </span>
-                  </dd>
-                  <dt>Net</dt>
-                  <dd className="num">
-                    {formatUsd(c.netActualCents, "rounded")}
-                    <span
-                      className={`cross-year-delta ${varianceClassExpense(netDelta)}`}
-                    >
-                      {formatUsd(netDelta, "rounded")}
-                    </span>
-                  </dd>
-                </dl>
-              </button>
-            );
-          })}
+          {columns.map((c) => (
+            <button
+              type="button"
+              key={c.yearId}
+              className="cross-year-total-card"
+              onClick={() => onJumpToYear(c.yearId)}
+            >
+              <div className="cross-year-total-head">
+                <span className="cross-year-total-label">{c.yearLabel}</span>
+                <span className="cross-year-total-meta">
+                  {c.trackedMonthCount}{" "}
+                  {c.trackedMonthCount === 1 ? "month" : "months"}
+                </span>
+              </div>
+              <dl className="cross-year-total-stats">
+                <dt>Income</dt>
+                <dd className="num">
+                  {formatUsd(c.incomeActualCents, "rounded")}
+                </dd>
+                <dt>Expenses</dt>
+                <dd className="num">
+                  {formatUsd(c.expenseActualCents, "rounded")}
+                </dd>
+                <dt>Net</dt>
+                <dd
+                  className={`num ${varianceClassExpense(c.netActualCents)}`}
+                >
+                  {formatUsd(c.netActualCents, "rounded")}
+                </dd>
+              </dl>
+            </button>
+          ))}
         </div>
       </section>
 
