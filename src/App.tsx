@@ -2149,10 +2149,12 @@ function CrossYearView({
   data,
   loading,
   onJumpToYear,
+  onBackToDashboard,
 }: {
   data: CrossYearOverview | null;
   loading: boolean;
   onJumpToYear: (yearId: number) => void;
+  onBackToDashboard: () => void;
 }) {
   if (loading && !data) {
     return <p className="muted month-loading-banner">Crunching cross-year totals…</p>;
@@ -2160,12 +2162,21 @@ function CrossYearView({
   if (!data || data.columns.length === 0) {
     return (
       <div className="year-overview">
-        <header className="year-overview-header">
-          <h1>All years</h1>
-          <p className="muted">
-            This budget doesn't have any years yet. Create one from the
-            sidebar to start a multi-year comparison.
-          </p>
+        <header className="year-overview-header cross-year-header">
+          <div className="cross-year-header-titles">
+            <h1>All years</h1>
+            <p className="muted">
+              This budget doesn't have any years yet. Create one from the
+              sidebar to start a multi-year comparison.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn ghost cross-year-back"
+            onClick={onBackToDashboard}
+          >
+            ← Back to dashboard
+          </button>
         </header>
       </div>
     );
@@ -2181,8 +2192,13 @@ function CrossYearView({
   const hasAnyValue = (r: { totalPlannedCents: number; totalActualCents: number }) =>
     r.totalPlannedCents !== 0 || r.totalActualCents !== 0;
   const bucketRows = data.bucketRows.filter(hasAnyValue);
+  // Income rows: actuals-only. The income side of the data model can
+  // surface multiple plan-only rows for the same display name (one per
+  // identity), which read as duplicates in the table. Restricting to
+  // rows with at least one year of recorded income removes the noise
+  // while still preserving every line that ever paid out.
   const incomeRows = data.lineRows.filter(
-    (r) => r.lineKind === "income" && hasAnyValue(r),
+    (r) => r.lineKind === "income" && r.totalActualCents !== 0,
   );
   const expenseRows = data.lineRows.filter(
     (r) => r.lineKind === "expense" && hasAnyValue(r),
@@ -2190,12 +2206,21 @@ function CrossYearView({
 
   return (
     <div className="year-overview cross-year-view">
-      <header className="year-overview-header">
-        <h1>All years in this budget</h1>
-        <p className="muted">
-          Comparing {columns.length} {columns.length === 1 ? "year" : "years"}.
-          Click a column header to open that year's overview.
-        </p>
+      <header className="year-overview-header cross-year-header">
+        <div className="cross-year-header-titles">
+          <h1>All years in this budget</h1>
+          <p className="muted">
+            Comparing {columns.length} {columns.length === 1 ? "year" : "years"}.
+            Click a column header to open that year's overview.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn ghost cross-year-back"
+          onClick={onBackToDashboard}
+        >
+          ← Back to dashboard
+        </button>
       </header>
 
       <section className="card">
@@ -2336,7 +2361,9 @@ function CrossYearMatrix({
       <table className="data-table cross-year-matrix">
         <thead>
           <tr>
-            <th className="cross-year-row-head">Row</th>
+            {/* Row-label column intentionally has no header — the
+                "Row" label was visual fluff that didn't add meaning. */}
+            <th className="cross-year-row-head" aria-hidden="true" />
             {columns.map((c) => (
               <th key={c.yearId} className="num">
                 <button
@@ -6982,6 +7009,7 @@ export default function App() {
               data={crossYear}
               loading={crossYearLoading}
               onJumpToYear={(id) => void enterYear(id)}
+              onBackToDashboard={exitYear}
             />
           )}
 
