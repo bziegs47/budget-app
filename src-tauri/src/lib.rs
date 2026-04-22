@@ -69,12 +69,6 @@ impl AppState {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn key_for(&self, label: &str) -> Result<Option<String>, String> {
-        let inner = self.inner.lock().map_err(|e| e.to_string())?;
-        Ok(inner.keys.get(label).cloned())
-    }
-
     fn register_path(&self, label: &str, path: PathBuf) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         inner.paths.insert(label.to_string(), path);
@@ -555,6 +549,11 @@ fn get_database_path(
 /// home/library launcher screens). Kept under the original name for
 /// frontend-compat — the semantics today are "no real budget open"
 /// rather than the legacy "you're on the hidden scratch DB".
+///
+/// The frontend has fully migrated to `has_open_budget`. This command
+/// is retained only as a reversibility hedge; it can be safely
+/// deleted in a follow-up once we're confident no external scripts or
+/// older window instances depend on it.
 #[tauri::command]
 fn is_default_workspace(
     state: tauri::State<AppState>,
@@ -563,9 +562,10 @@ fn is_default_workspace(
     Ok(state.current_path_opt(&label_of(&window))?.is_none())
 }
 
-/// Inverse of `is_default_workspace` — explicit affirmative form. New
-/// frontend code should prefer this for clarity; both endpoints return
-/// the same underlying truth.
+/// Affirmative form: true when this window has a real budget open.
+/// Preferred over `is_default_workspace` (which is the inverse and
+/// kept only for back-compat). All current frontend call sites use
+/// this command.
 #[tauri::command]
 fn has_open_budget(
     state: tauri::State<AppState>,

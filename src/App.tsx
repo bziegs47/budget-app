@@ -231,6 +231,18 @@ function relativeTimeShort(ms: number): string {
   return `${day}d ago`;
 }
 
+// Mirror a piece of state into a ref so async callbacks (menu
+// listeners, IPC subscribers, autosave timers) can read the latest
+// value without re-binding when the state changes. Replaces the
+// useRef + useEffect boilerplate at every call site.
+function useSyncedRef<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return ref;
+}
+
 function SaveStatusPill({
   isDefaultWorkspace,
   dirty,
@@ -246,6 +258,16 @@ function SaveStatusPill({
   lastSnapshotAt: number | null;
   onSaveAs: () => void;
 }) {
+  // Tick `now` every 30s so the "Auto-saved Xm ago" relative time
+  // ages without forcing the parent App tree to re-render. The
+  // interval is local to this component because nothing else needs
+  // a refreshed clock.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   if (isDefaultWorkspace) {
     if (dirty) {
       return (
@@ -278,7 +300,7 @@ function SaveStatusPill({
         className="status-pill ok"
         title={`Last snapshot ${new Date(lastSnapshotAt).toLocaleString()}`}
       >
-        <span className="status-dot ok" /> Auto-saved {relativeTimeShort(Date.now() - lastSnapshotAt)}
+        <span className="status-dot ok" /> Auto-saved {relativeTimeShort(now - lastSnapshotAt)}
       </span>
     );
   }
@@ -5091,26 +5113,11 @@ export default function App() {
   // forward-references.
   const isLauncherView = view.kind === "welcome" || view.kind === "library";
 
-  const monthsRef = useRef<MonthRow[]>([]);
-  const viewRef = useRef<AppView>(view);
-  const monthViewRef = useRef<MonthView | null>(null);
-  const sidebarYearIdRef = useRef<number | null>(null);
-  const yearsRef = useRef<YearRow[]>([]);
-  useEffect(() => {
-    monthsRef.current = months;
-  }, [months]);
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
-  useEffect(() => {
-    monthViewRef.current = monthView;
-  }, [monthView]);
-  useEffect(() => {
-    sidebarYearIdRef.current = sidebarYearId;
-  }, [sidebarYearId]);
-  useEffect(() => {
-    yearsRef.current = years;
-  }, [years]);
+  const monthsRef = useSyncedRef(months);
+  const viewRef = useSyncedRef(view);
+  const monthViewRef = useSyncedRef(monthView);
+  const sidebarYearIdRef = useSyncedRef(sidebarYearId);
+  const yearsRef = useSyncedRef(years);
 
   useEffect(() => {
     if (!ytdDrawer) {
@@ -5290,9 +5297,9 @@ export default function App() {
     setError(null);
     try {
       // After the scratch elimination, the window starts with NO budget
-      // open. `get_database_path` returns "" and `is_default_workspace`
-      // returns true in that state. We treat both as "show home, run no
-      // data fetches".
+      // open. `get_database_path` returns "" and `has_open_budget`
+      // returns false in that state. We treat both as "show home, run
+      // no data fetches".
       const path = await invoke<string>("get_database_path");
       setDbPath(path);
       const hasBudget = await invoke<boolean>("has_open_budget");
@@ -5687,8 +5694,8 @@ export default function App() {
       await invoke("save_budget_as", { targetPath: target });
       const newPath = await invoke<string>("get_database_path");
       setDbPath(newPath);
-      const isDefault = await invoke<boolean>("is_default_workspace");
-      setIsDefaultWorkspace(isDefault);
+      const hasBudget = await invoke<boolean>("has_open_budget");
+      setIsDefaultWorkspace(!hasBudget);
       void refreshSettings();
       void refreshWorkspaceMeta();
       return true;
@@ -6104,9 +6111,9 @@ export default function App() {
         event.preventDefault();
         void (async () => {
           try {
-            const isDefault = await invoke<boolean>("is_default_workspace");
+            const hasBudget = await invoke<boolean>("has_open_budget");
             const dirty = await invoke<boolean>("is_dirty");
-            if (!isDefault || !dirty) {
+            if (!hasBudget || !dirty) {
               await win.destroy();
               return;
             }
@@ -6355,14 +6362,6 @@ export default function App() {
       window.clearInterval(id);
     };
   }, [dbPath, isDefaultWorkspace, isLauncherView]);
-
-  // "Last saved" pill ticks every 30s so "2m ago" stays current.
-  const [pillTick, setPillTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setPillTick((n) => n + 1), 30_000);
-    return () => window.clearInterval(id);
-  }, []);
-  void pillTick;
 
   const activeMonthId = useCallback((): number | null => {
     const v = viewRef.current;
