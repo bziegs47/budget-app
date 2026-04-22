@@ -1,4 +1,6 @@
-export function PlusIcon({ size = 14 }: { size?: number }) {
+import type { IconProps } from "./types";
+
+export function PlusIcon({ size = 14, className }: IconProps) {
   return (
     <svg
       width={size}
@@ -8,6 +10,7 @@ export function PlusIcon({ size = 14 }: { size?: number }) {
       stroke="currentColor"
       strokeWidth={2}
       strokeLinecap="round"
+      className={className}
       aria-hidden="true"
     >
       <line x1="5" y1="12" x2="19" y2="12" />

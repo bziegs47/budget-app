@@ -1,4 +1,6 @@
-export function LockIcon({ size = 12 }: { size?: number }) {
+import type { IconProps } from "./types";
+
+export function LockIcon({ size = 12, className }: IconProps) {
   return (
     <svg
       width={size}
@@ -9,6 +11,7 @@ export function LockIcon({ size = 12 }: { size?: number }) {
       strokeWidth={1.75}
       strokeLinecap="round"
       strokeLinejoin="round"
+      className={className}
       aria-hidden="true"
     >
       <rect x="5" y="11" width="14" height="9" rx="2" />
