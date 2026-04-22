@@ -3306,3 +3306,55 @@ body {
   padding: 0.75rem 1.25rem;
   margin-top: 0;
 }
+
+/* ErrorBoundary fallback — root-level safety net rendered when any
+   component throws. Centered card on the standard dark surface. */
+.error-boundary {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg);
+  z-index: 9999;
+}
+
+.error-boundary-card {
+  width: min(560px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.75rem 1.75rem 1.5rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.error-boundary-card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+}
+
+.error-boundary-card .muted {
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+
+.error-boundary pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.8rem;
+  color: var(--danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.error-boundary-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
