@@ -2401,78 +2401,14 @@ body {
   white-space: nowrap;
 }
 
-/* Year totals cards: structurally mirror .budget-dashboard-strip-card
-   so the two surfaces (dashboard strip and cross-year totals) read
-   as the same vocabulary. We don't share class names because the
-   containers (snap-strip vs free grid) differ — but the card
-   internals are visually identical. */
-.cross-year-totals {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 0.6rem;
-}
-
-.cross-year-total-card {
-  text-align: left;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.7rem 0.85rem;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
+/* Year totals reuses the dashboard's strip pager classes wholesale so
+   the two surfaces read as one paginated card grid. The cross-year
+   variant only needs a narrow scoping wrapper so the pager renders
+   inside the card with appropriate spacing above the dots. */
+.cross-year-totals-card {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-
-.cross-year-total-card:hover {
-  border-color: var(--accent);
-  background: var(--surface-3, var(--surface-2));
-}
-
-.cross-year-total-card:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft, rgba(60, 130, 246, 0.25));
-}
-
-.cross-year-total-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.cross-year-total-label {
-  font-weight: 700;
-  font-size: 1rem;
-}
-
-.cross-year-total-meta {
-  font-size: 0.72rem;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.cross-year-total-stats {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.2rem 0.65rem;
-  margin: 0;
-}
-
-.cross-year-total-stats dt {
-  font-size: 0.74rem;
-  color: var(--muted);
-}
-
-.cross-year-total-stats dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  text-align: right;
+  gap: 0.6rem;
 }
 
 /* Matrix wrapper owns horizontal scroll. Width: auto (instead of 100%

@@ -2145,6 +2145,11 @@ function YearOverviewView({
 // the active workspace at a glance. Rows are buckets and lines, columns are
 // years. Clicking a column header drops back into that year's overview so the
 // user can drill in without losing the broader context.
+// Same chunk size as the BudgetDashboard year strip — keeps the two
+// surfaces visually paged identically (4 cols × 2 rows = 8 per page,
+// down to 2 × 4 below the 720px breakpoint via shared CSS).
+const CROSS_YEAR_TOTALS_PER_PAGE = 8;
+
 function CrossYearView({
   data,
   loading,
@@ -2156,6 +2161,44 @@ function CrossYearView({
   onJumpToYear: (yearId: number) => void;
   onBackToDashboard: () => void;
 }) {
+  // Page tracking state mirrors BudgetDashboard's strip — no
+  // selectedYear concept here so we don't need the auto-anchor
+  // effect; mouse/wheel scroll drives the dots, dots are read-only.
+  const totalsScrollerRef = useRef<HTMLDivElement | null>(null);
+  const totalsPageRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [currentTotalsPage, setCurrentTotalsPage] = useState(0);
+
+  const onTotalsScroll = useCallback(() => {
+    const el = totalsScrollerRef.current;
+    if (!el) return;
+    const x = el.scrollLeft;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    totalsPageRefs.current.forEach((pageEl, i) => {
+      if (!pageEl) return;
+      const d = Math.abs(pageEl.offsetLeft - x);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    });
+    setCurrentTotalsPage((prev) => (prev === bestIdx ? prev : bestIdx));
+  }, []);
+
+  // Chunk columns into pages of 8 — same math as BudgetDashboard.
+  // Falls back to a single empty page so the JSX below can map
+  // unconditionally without an extra null check.
+  const totalsPages = useMemo(() => {
+    const cols = data?.columns ?? [];
+    if (cols.length === 0) return [[] as CrossYearOverview["columns"]];
+    const out: CrossYearOverview["columns"][] = [];
+    for (let i = 0; i < cols.length; i += CROSS_YEAR_TOTALS_PER_PAGE) {
+      out.push(cols.slice(i, i + CROSS_YEAR_TOTALS_PER_PAGE));
+    }
+    return out;
+  }, [data?.columns]);
+  const showTotalsPager = totalsPages.length > 1;
+
   if (loading && !data) {
     return <p className="muted month-loading-banner">Crunching cross-year totals…</p>;
   }
@@ -2230,46 +2273,85 @@ function CrossYearView({
         </button>
       </header>
 
-      <section className="card">
+      <section className="card cross-year-totals-card">
         <h2>Year totals</h2>
-        {/* Cards mirror the dashboard year-strip card formatting so the
-            two surfaces read as one consistent vocabulary. Variance vs
-            plan lives in the matrices below; these are the headline
-            actuals at a glance. */}
-        <div className="cross-year-totals">
-          {columns.map((c) => (
-            <button
-              type="button"
-              key={c.yearId}
-              className="cross-year-total-card"
-              onClick={() => onJumpToYear(c.yearId)}
-            >
-              <div className="cross-year-total-head">
-                <span className="cross-year-total-label">{c.yearLabel}</span>
-                <span className="cross-year-total-meta">
-                  {c.trackedMonthCount}{" "}
-                  {c.trackedMonthCount === 1 ? "month" : "months"}
-                </span>
+        {/* Reuses the dashboard's year-strip pager structure so this
+            view and the dashboard read as one vocabulary. Same chunk
+            of 8 (4×2 / 2×4 below 720px), same snap-scroll behavior,
+            same page dots indicator. No selectedYear concept here —
+            clicking a card jumps directly to that year's overview. */}
+        <div className="budget-dashboard-strip-pager cross-year-totals-pager">
+          <div
+            className="budget-dashboard-strip-scroller"
+            ref={totalsScrollerRef}
+            onScroll={onTotalsScroll}
+          >
+            {totalsPages.map((page, pageIdx) => (
+              <div
+                key={pageIdx}
+                ref={(el) => {
+                  totalsPageRefs.current[pageIdx] = el;
+                }}
+                className="budget-dashboard-strip-page"
+                role="group"
+                aria-label={`Year totals page ${pageIdx + 1} of ${totalsPages.length}`}
+              >
+                {page.map((c) => (
+                  <button
+                    type="button"
+                    key={c.yearId}
+                    className="budget-dashboard-strip-card"
+                    onClick={() => onJumpToYear(c.yearId)}
+                  >
+                    <div className="budget-dashboard-strip-head">
+                      <span className="budget-dashboard-strip-label">
+                        {c.yearLabel}
+                      </span>
+                      <span className="budget-dashboard-strip-meta">
+                        {c.trackedMonthCount}{" "}
+                        {c.trackedMonthCount === 1 ? "month" : "months"}
+                      </span>
+                    </div>
+                    <dl className="budget-dashboard-strip-stats">
+                      <dt>Income</dt>
+                      <dd className="num">
+                        {formatUsd(c.incomeActualCents, "rounded")}
+                      </dd>
+                      <dt>Expenses</dt>
+                      <dd className="num">
+                        {formatUsd(c.expenseActualCents, "rounded")}
+                      </dd>
+                      <dt>Net</dt>
+                      <dd
+                        className={`num ${varianceClassExpense(c.netActualCents)}`}
+                      >
+                        {formatUsd(c.netActualCents, "rounded")}
+                      </dd>
+                    </dl>
+                  </button>
+                ))}
               </div>
-              <dl className="cross-year-total-stats">
-                <dt>Income</dt>
-                <dd className="num">
-                  {formatUsd(c.incomeActualCents, "rounded")}
-                </dd>
-                <dt>Expenses</dt>
-                <dd className="num">
-                  {formatUsd(c.expenseActualCents, "rounded")}
-                </dd>
-                <dt>Net</dt>
-                <dd
-                  className={`num ${varianceClassExpense(c.netActualCents)}`}
-                >
-                  {formatUsd(c.netActualCents, "rounded")}
-                </dd>
-              </dl>
-            </button>
-          ))}
+            ))}
+          </div>
         </div>
+        {showTotalsPager && (
+          <div
+            className="budget-dashboard-strip-dots"
+            role="presentation"
+            aria-hidden="true"
+          >
+            {totalsPages.map((_, i) => (
+              <span
+                key={i}
+                className={
+                  i === currentTotalsPage
+                    ? "budget-dashboard-strip-dot is-active"
+                    : "budget-dashboard-strip-dot"
+                }
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {bucketRows.length > 0 && (
