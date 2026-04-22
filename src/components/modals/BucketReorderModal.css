@@ -1,0 +1,58 @@
+.bucket-reorder-card {
+  width: min(420px, 92vw);
+}
+
+.bucket-reorder-list {
+  list-style: none;
+  margin: 0.75rem 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.bucket-reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  cursor: grab;
+  user-select: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+.bucket-reorder-row:hover {
+  border-color: var(--accent);
+}
+
+.bucket-reorder-row:active {
+  cursor: grabbing;
+}
+
+.bucket-reorder-row.dragging {
+  opacity: 0.5;
+}
+
+.bucket-reorder-row.drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.25);
+}
+
+.bucket-reorder-handle {
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: -0.1em;
+  user-select: none;
+}
+
+.bucket-reorder-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
