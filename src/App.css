@@ -2475,13 +2475,30 @@ body {
   text-align: right;
 }
 
+/* Matrix wrapper owns horizontal scroll. Width: auto (instead of 100%
+   on the table) lets each year column claim its own minimum width
+   regardless of whether it has data — otherwise blank columns
+   collapse to the width of an em-dash and the table won't grow past
+   the container, hiding the very overflow we want to expose. */
 .cross-year-matrix-wrap {
   overflow-x: auto;
+  /* Anchor the sticky first column against this scroll container. */
+  position: relative;
 }
 
 .cross-year-matrix {
-  width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: auto;
+  min-width: 100%;
+}
+
+.cross-year-matrix th,
+.cross-year-matrix td {
+  /* Uniform per-year minimum so populated and blank columns occupy
+     the same horizontal space. Once the column count pushes the
+     table past the wrapper, .cross-year-matrix-wrap scrolls. */
+  min-width: 7.5rem;
 }
 
 .cross-year-row-head {
@@ -2489,6 +2506,26 @@ body {
   vertical-align: top;
   white-space: nowrap;
   padding-right: 0.75rem;
+  /* Freeze the row-label column so labels stay readable while the
+     year columns scroll horizontally. The row head is a th; we set
+     left:0 + a solid background so cells beneath it during scroll
+     don't bleed through. */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  /* Wider min so multi-word bucket / line names breathe and the
+     sticky column has predictable width across browsers. */
+  min-width: 14rem;
+  /* Soft right edge so users see the column boundary while scrolling. */
+  border-right: 1px solid var(--border);
+}
+
+/* Header row's sticky cell needs to sit above the body cells so it
+   doesn't get covered when both vertical and horizontal scroll
+   intersect. */
+thead .cross-year-row-head {
+  z-index: 2;
 }
 
 .cross-year-row-label {
