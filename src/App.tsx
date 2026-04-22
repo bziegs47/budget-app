@@ -2192,17 +2192,24 @@ function CrossYearView({
   const hasAnyValue = (r: { totalPlannedCents: number; totalActualCents: number }) =>
     r.totalPlannedCents !== 0 || r.totalActualCents !== 0;
   const bucketRows = data.bucketRows.filter(hasAnyValue);
-  // Income rows: actuals-only. The income side of the data model can
-  // surface multiple plan-only rows for the same display name (one per
-  // identity), which read as duplicates in the table. Restricting to
-  // rows with at least one year of recorded income removes the noise
-  // while still preserving every line that ever paid out.
-  const incomeRows = data.lineRows.filter(
-    (r) => r.lineKind === "income" && r.totalActualCents !== 0,
-  );
-  const expenseRows = data.lineRows.filter(
-    (r) => r.lineKind === "expense" && hasAnyValue(r),
-  );
+  // Collapse logical lines that surface as multiple rows. The backend
+  // keys line_rows by line_identity, but several distinct identities
+  // commonly share a single display name (a per-month or per-year
+  // duplication of the same logical line). For the cross-year table
+  // those identities should read as one row — sum cells positionally
+  // and sum the totals. Income groups by display name only (no bucket
+  // dimension); expense groups by display name + bucket so two
+  // different buckets that happen to share a line name stay separate.
+  const incomeRows = aggregateLineRows(
+    data.lineRows.filter((r) => r.lineKind === "income"),
+    columns.length,
+    "income",
+  ).filter(hasAnyValue);
+  const expenseRows = aggregateLineRows(
+    data.lineRows.filter((r) => r.lineKind === "expense"),
+    columns.length,
+    "expense",
+  ).filter(hasAnyValue);
 
   return (
     <div className="year-overview cross-year-view">
@@ -2288,7 +2295,7 @@ function CrossYearView({
           <CrossYearMatrix
             columns={columns}
             rows={incomeRows.map((r) => ({
-              key: `${r.lineKind}::${r.lineIdentity}`,
+              key: r.groupKey,
               label: r.displayName,
               sublabel: undefined,
               cells: r.cells,
@@ -2307,7 +2314,7 @@ function CrossYearView({
           <CrossYearMatrix
             columns={columns}
             rows={expenseRows.map((r) => ({
-              key: `${r.lineKind}::${r.lineIdentity}`,
+              key: r.groupKey,
               label: r.displayName,
               sublabel: r.bucketName ?? undefined,
               cells: r.cells,
@@ -2319,6 +2326,68 @@ function CrossYearView({
         </section>
       )}
     </div>
+  );
+}
+
+// Aggregated row produced by collapsing one or more CrossYearLineRow
+// entries that share a logical identity. We keep the original
+// displayName / bucketName for labeling and add a stable groupKey
+// for React keys.
+type AggregatedLineRow = {
+  groupKey: string;
+  displayName: string;
+  bucketName: string | null;
+  cells: { plannedCents: number; actualCents: number }[];
+  totalPlannedCents: number;
+  totalActualCents: number;
+};
+
+// Group rows by a kind-appropriate key:
+// - income: by case-insensitive display name (no bucket dimension)
+// - expense: by display name + bucket name (so identical line names
+//   in different buckets stay separate)
+// Cells are summed positionally. Sorted by display name (case-insensitive)
+// so the visible ordering matches the backend's sort within a kind.
+function aggregateLineRows(
+  rows: { displayName: string; bucketName: string | null;
+    cells: { plannedCents: number; actualCents: number }[];
+    totalPlannedCents: number; totalActualCents: number }[],
+  columnCount: number,
+  kind: "income" | "expense",
+): AggregatedLineRow[] {
+  const groups = new Map<string, AggregatedLineRow>();
+  for (const r of rows) {
+    const nameKey = r.displayName.trim().toLowerCase();
+    const groupKey =
+      kind === "expense"
+        ? `expense::${nameKey}::${(r.bucketName ?? "").trim().toLowerCase()}`
+        : `income::${nameKey}`;
+    let agg = groups.get(groupKey);
+    if (!agg) {
+      agg = {
+        groupKey,
+        displayName: r.displayName,
+        bucketName: r.bucketName,
+        cells: Array.from({ length: columnCount }, () => ({
+          plannedCents: 0,
+          actualCents: 0,
+        })),
+        totalPlannedCents: 0,
+        totalActualCents: 0,
+      };
+      groups.set(groupKey, agg);
+    }
+    for (let i = 0; i < columnCount; i++) {
+      const cell = r.cells[i];
+      if (!cell) continue;
+      agg.cells[i].plannedCents += cell.plannedCents;
+      agg.cells[i].actualCents += cell.actualCents;
+    }
+    agg.totalPlannedCents += r.totalPlannedCents;
+    agg.totalActualCents += r.totalActualCents;
+  }
+  return Array.from(groups.values()).sort((a, b) =>
+    a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()),
   );
 }
 
