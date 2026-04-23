@@ -1,0 +1,38 @@
+.line-edit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.line-edit-toggle {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 0.5rem 0.65rem;
+  align-items: start;
+  padding: 0.65rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.line-edit-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.line-edit-toggle-label {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.line-edit-toggle-hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
