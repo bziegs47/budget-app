@@ -2227,6 +2227,7 @@ function MonthBudgetView({
               <IncomeLineBlock
                 key={line.id}
                 line={line}
+                budgetYearMonth={view.yearMonth}
                 expanded={expandedIncome.has(line.id)}
                 onToggle={() => onToggleIncome(line.id)}
                 onRefresh={onRefresh}
@@ -2281,6 +2282,7 @@ function MonthBudgetView({
                 <ExpenseLineBlock
                   key={line.id}
                   line={line}
+                  budgetYearMonth={view.yearMonth}
                   expanded={expandedExpense.has(line.id)}
                   onToggle={() => onToggleExpense(line.id)}
                   onRefresh={onRefresh}
@@ -2478,6 +2480,11 @@ export default function App() {
       return n;
     });
   };
+
+  useEffect(() => {
+    setExpandedIncome(new Set());
+    setExpandedExpense(new Set());
+  }, [view]);
 
   const refreshMonthView = useCallback(async (monthId: number) => {
     setError(null);
@@ -4544,12 +4551,14 @@ function SummaryRow({
 
 function IncomeLineBlock({
   line,
+  budgetYearMonth,
   expanded,
   onToggle,
   onRefresh,
   onOpenYtd,
 }: {
   line: IncomeLineDto;
+  budgetYearMonth: string;
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
@@ -4588,7 +4597,9 @@ function IncomeLineBlock({
             invalid={parseError}
           />
         </td>
-        <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
+        <td className="num clickable-cell" onClick={onToggle} title="Show entries">
+          {formatUsd(line.actualCents, "rounded")}
+        </td>
         <td className={`num ${varianceClassIncome(line.varianceCents)}`}>
           {formatUsd(line.varianceCents, "rounded")}
         </td>
@@ -4613,7 +4624,7 @@ function IncomeLineBlock({
       {expanded && (
         <tr className="detail-row">
           <td colSpan={5}>
-            <IncomeEntriesPanel lineId={line.id} entries={line.entries} onDone={onRefresh} />
+            <IncomeEntriesPanel lineId={line.id} entries={line.entries} budgetYearMonth={budgetYearMonth} onDone={onRefresh} />
           </td>
         </tr>
       )}
@@ -4624,15 +4635,18 @@ function IncomeLineBlock({
 function IncomeEntriesPanel({
   lineId,
   entries,
+  budgetYearMonth,
   onDone,
 }: {
   lineId: number;
   entries: IncomeLineDto["entries"];
+  budgetYearMonth: string;
   onDone: () => void;
 }) {
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
+  const [justAdded, setJustAdded] = useState(false);
 
   const add = async () => {
     const c = parseMoneyToCents(amount);
@@ -4645,12 +4659,22 @@ function IncomeEntriesPanel({
     });
     setLabel("");
     setAmount("");
+    setDate("");
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 700);
     await onDone();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void add();
+    }
   };
 
   return (
     <div className="detail-panel">
-      <div className="detail-toolbar">
+      <div className={`detail-toolbar${justAdded ? " just-added" : ""}`} onKeyDown={onKeyDown}>
         <input
           className="input"
           placeholder="Label"
@@ -4665,9 +4689,9 @@ function IncomeEntriesPanel({
           onChange={(e) => setAmount(e.target.value)}
           onFocus={selectAllOnFocus}
         />
-        <DateField value={date} onChange={setDate} ariaLabel="Received on" />
-        <button type="button" className="btn secondary" onClick={() => void add()}>
-          Add entry
+        <DateField value={date} onChange={setDate} ariaLabel="Received on" fixedMonthYear={{ mm: budgetYearMonth.slice(5, 7), yyyy: budgetYearMonth.slice(0, 4) }} />
+        <button type="button" className={`btn ${justAdded ? "primary" : "secondary"}`} onClick={() => void add()}>
+          {justAdded ? "Added ✓" : "Add entry"}
         </button>
       </div>
       <ul className="entry-list">
@@ -4693,6 +4717,7 @@ function IncomeEntriesPanel({
 
 function ExpenseLineBlock({
   line,
+  budgetYearMonth,
   expanded,
   onToggle,
   onRefresh,
@@ -4701,6 +4726,7 @@ function ExpenseLineBlock({
   onOpenYtd,
 }: {
   line: ExpenseLineDto;
+  budgetYearMonth: string;
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
@@ -4763,7 +4789,9 @@ function ExpenseLineBlock({
             invalid={parseError}
           />
         </td>
-        <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
+        <td className="num clickable-cell" onClick={onToggle} title="Show transactions">
+          {formatUsd(line.actualCents, "rounded")}
+        </td>
         <td className={`num ${varianceClassExpense(line.varianceCents)}`}>
           {formatUsd(line.varianceCents, "rounded")}
         </td>
@@ -4801,7 +4829,7 @@ function ExpenseLineBlock({
       {expanded && (
         <tr className="detail-row">
           <td colSpan={5}>
-            <TransactionsPanel lineId={line.id} txs={line.transactions} onDone={onRefresh} />
+            <TransactionsPanel lineId={line.id} txs={line.transactions} budgetYearMonth={budgetYearMonth} onDone={onRefresh} />
           </td>
         </tr>
       )}
@@ -4812,15 +4840,18 @@ function ExpenseLineBlock({
 function TransactionsPanel({
   lineId,
   txs,
+  budgetYearMonth,
   onDone,
 }: {
   lineId: number;
   txs: ExpenseLineDto["transactions"];
+  budgetYearMonth: string;
   onDone: () => void;
 }) {
   const [payee, setPayee] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
+  const [justAdded, setJustAdded] = useState(false);
 
   const add = async () => {
     const c = parseMoneyToCents(amount);
@@ -4833,12 +4864,22 @@ function TransactionsPanel({
     });
     setPayee("");
     setAmount("");
+    setDate("");
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 700);
     await onDone();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void add();
+    }
   };
 
   return (
     <div className="detail-panel">
-      <div className="detail-toolbar">
+      <div className={`detail-toolbar${justAdded ? " just-added" : ""}`} onKeyDown={onKeyDown}>
         <input
           className="input"
           placeholder="Payee"
@@ -4853,9 +4894,9 @@ function TransactionsPanel({
           onChange={(e) => setAmount(e.target.value)}
           onFocus={selectAllOnFocus}
         />
-        <DateField value={date} onChange={setDate} ariaLabel="Occurred on" />
-        <button type="button" className="btn secondary" onClick={() => void add()}>
-          Add transaction
+        <DateField value={date} onChange={setDate} ariaLabel="Occurred on" fixedMonthYear={{ mm: budgetYearMonth.slice(5, 7), yyyy: budgetYearMonth.slice(0, 4) }} />
+        <button type="button" className={`btn ${justAdded ? "primary" : "secondary"}`} onClick={() => void add()}>
+          {justAdded ? "Added ✓" : "Add transaction"}
         </button>
       </div>
       <ul className="entry-list">

@@ -364,6 +364,16 @@ body {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.65rem;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.35rem;
+  margin: -0.35rem -0.35rem 0.3rem;
+}
+
+.detail-toolbar.just-added {
+  border-color: rgba(62, 207, 142, 0.5);
+  box-shadow: 0 0 0 2px rgba(62, 207, 142, 0.15);
 }
 
 .entry-list {
@@ -556,8 +566,13 @@ body {
   width: 7.5rem;
 }
 
+.budget-line-table th.num,
+.budget-line-table td.num {
+  text-align: center;
+}
+
 .budget-line-table .col-actions {
-  width: 5.5rem;
+  width: 7.5rem;
 }
 
 /* Inside the table, make the planned-amount input fill its column
@@ -567,7 +582,7 @@ body {
   display: flex;
   width: 100%;
   min-width: 0;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .budget-line-table .currency-field .input-money {
@@ -580,6 +595,15 @@ body {
    "Rent / mortgage"); allow it to wrap rather than blow up the row. */
 .budget-line-table td:first-child {
   overflow-wrap: anywhere;
+}
+
+.budget-line-table .clickable-cell {
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.budget-line-table .clickable-cell:hover {
+  color: var(--accent);
 }
 
 .bucket-header {
