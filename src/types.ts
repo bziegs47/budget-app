@@ -306,3 +306,12 @@ export type CrossYearOverview = {
   bucketRows: CrossYearBucketRow[];
   lineRows: CrossYearLineRow[];
 };
+
+export type AppView =
+  | { kind: "welcome" }
+  | { kind: "library" }
+  | { kind: "years-landing" }
+  | { kind: "year-overview"; yearId: number }
+  | { kind: "reports" }
+  | { kind: "cross-year" }
+  | { kind: "month"; monthId: number };

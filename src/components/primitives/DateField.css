@@ -90,3 +90,10 @@
   box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.35);
   color: var(--text);
 }
+
+.date-seg-fixed {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: inherit;
+  user-select: none;
+}

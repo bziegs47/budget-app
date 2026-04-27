@@ -17,6 +17,7 @@ import {
 } from "./money";
 import type {
   AppSettings,
+  AppView,
   CrossYearOverview,
   DuplicateYearArgs,
   ExpenseBucketDto,
@@ -67,22 +68,8 @@ import { DeleteYearConfirmModal } from "./components/modals/DeleteYearConfirmMod
 import { RenameWorkspaceModal } from "./components/modals/RenameWorkspaceModal";
 import { DeleteWorkspaceConfirmModal } from "./components/modals/DeleteWorkspaceConfirmModal";
 import { DuplicateYearModal } from "./components/modals/DuplicateYearModal";
+import { Sidebar } from "./components/sidebar/Sidebar";
 import "./App.css";
-
-const MONTH_NAMES_FULL = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-] as const;
 
 function basenameNoExt(path: string): string {
   if (!path) return "";
@@ -127,228 +114,6 @@ function selectAllOnFocus(e: React.FocusEvent<HTMLInputElement>) {
 // was null, and also had a third dead branch that fell back to the
 // welcome screen on an empty workspace — now unreachable since the
 // scratch DB is gone and bootstrap routes empties to `welcome`.
-type AppView =
-  | { kind: "welcome" }
-  | { kind: "library" }
-  | { kind: "years-landing" }
-  | { kind: "year-overview"; yearId: number }
-  | { kind: "reports" }
-  | { kind: "cross-year" }
-  | { kind: "month"; monthId: number };
-
-function YearListRow({
-  year,
-  active,
-  onSelect,
-}: {
-  year: YearRow;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <li className={`sidebar-year-row ${active ? "active" : ""}`}>
-      <button type="button" className="sidebar-year-main" onClick={onSelect}>
-        <span className="sidebar-year-label-big">{year.yearLabel}</span>
-        <span className="sidebar-year-meta muted">
-          {year.trackedMonthCount === 0
-            ? "No months tracked"
-            : `${year.trackedMonthCount} ${
-                year.trackedMonthCount === 1 ? "month" : "months"
-              } tracked`}
-        </span>
-      </button>
-    </li>
-  );
-}
-
-function MonthRowItem({
-  row,
-  active,
-  onActivate,
-}: {
-  row: MonthRow;
-  active: boolean;
-  onActivate: () => void;
-}) {
-  const monthLabel =
-    row.calendarMonth != null
-      ? MONTH_NAMES_FULL[row.calendarMonth - 1]
-      : row.tabLabel;
-  return (
-    <li className={`sidebar-month-row ${active ? "active" : ""}`}>
-      <button type="button" className="sidebar-month-main" onClick={onActivate}>
-        <span className="sidebar-month-label">{monthLabel}</span>
-      </button>
-    </li>
-  );
-}
-
-function Sidebar({
-  collapsed,
-  onToggleCollapsed,
-  workspaceTitle,
-  workspaceTitleIsPlaceholder,
-  workspacePathTooltip,
-  years,
-  months,
-  view,
-  sidebarYearId,
-  onSelectYear,
-  onBackToYears,
-  onShowYearOverview,
-  onActivateMonth,
-}: {
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  workspaceTitle: string;
-  workspaceTitleIsPlaceholder: boolean;
-  workspacePathTooltip?: string;
-  years: YearRow[];
-  months: MonthRow[];
-  view: AppView;
-  sidebarYearId: number | null;
-  onSelectYear: (id: number) => void;
-  onBackToYears: () => void;
-  onShowYearOverview: (id: number) => void;
-  onActivateMonth: (id: number) => void;
-}) {
-  if (collapsed) {
-    return (
-      <aside className="sidebar collapsed" aria-label="Budget sidebar">
-        <button
-          type="button"
-          className="sidebar-collapse-tab"
-          onClick={onToggleCollapsed}
-          title="Expand sidebar (⌘\\)"
-          aria-label="Expand sidebar"
-        >
-          ›
-        </button>
-      </aside>
-    );
-  }
-
-  const activeYear = years.find((y) => y.id === sidebarYearId) ?? null;
-  const overviewActive =
-    view.kind === "year-overview" && activeYear != null && view.yearId === activeYear.id;
-
-  return (
-    <aside className="sidebar" aria-label="Budget sidebar">
-      <div className="sidebar-header">
-        <div
-          className={`sidebar-workspace${
-            workspaceTitleIsPlaceholder ? " is-placeholder" : ""
-          }`}
-          title={workspacePathTooltip}
-        >
-          <span className="sidebar-workspace-eyebrow">Budget</span>
-          <span className="sidebar-workspace-title">{workspaceTitle}</span>
-        </div>
-        {activeYear ? (
-          <button
-            type="button"
-            className="sidebar-back"
-            onClick={onBackToYears}
-            title="Back to dashboard"
-            aria-label="Back to dashboard"
-          >
-            ‹ Dashboard
-          </button>
-        ) : (
-          <h3 className="sidebar-section-title sidebar-eyebrow-title">Go to year</h3>
-        )}
-      </div>
-
-      <div className="sidebar-scroll">
-      {!activeYear && (
-        <div className="sidebar-section">
-          {/* Sidebar is navigation-only on the dashboard. Cross-year
-              comparison + "New year" both live in the dashboard's
-              own actions to avoid duplicating commands here. */}
-          <ul className="sidebar-year-list">
-            {years.length === 0 && (
-              <li className="sidebar-empty muted">
-                No years yet — add one from the dashboard.
-              </li>
-            )}
-            {years.map((y) => (
-              <YearListRow
-                key={y.id}
-                year={y}
-                active={false}
-                onSelect={() => onSelectYear(y.id)}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {activeYear && (
-        <>
-          <div className={`sidebar-year-header ${overviewActive ? "active" : ""}`}>
-            <button
-              type="button"
-              className="sidebar-year-main"
-              onClick={() => onShowYearOverview(activeYear.id)}
-              title="Show year overview"
-            >
-              <span className="sidebar-year-eyebrow">Year</span>
-              <span className="sidebar-year-label">{activeYear.yearLabel}</span>
-            </button>
-          </div>
-
-          <hr className="sidebar-divider" aria-hidden="true" />
-
-          <div className="sidebar-section">
-            <ul className="sidebar-month-list">
-              <li className={`sidebar-month-row ${overviewActive ? "active" : ""}`}>
-                <button
-                  type="button"
-                  className="sidebar-month-main"
-                  onClick={() => onShowYearOverview(activeYear.id)}
-                >
-                  <span className="sidebar-month-label">Year overview</span>
-                </button>
-              </li>
-            </ul>
-            <h3 className="sidebar-section-title">Months</h3>
-            {/* Every year is scaffolded with Jan–Dec, so we just
-                sort by calendar position. The data model still allows
-                non-calendar rows but there's no UI path to create
-                them; if a legacy file somehow has any, they'll sort
-                to the end via the `?? 99` fallback. */}
-            <ul className="sidebar-month-list nested">
-              {[...months]
-                .sort(
-                  (a, b) => (a.calendarMonth ?? 99) - (b.calendarMonth ?? 99),
-                )
-                .map((m) => (
-                  <MonthRowItem
-                    key={m.id}
-                    row={m}
-                    active={view.kind === "month" && view.monthId === m.id}
-                    onActivate={() => onActivateMonth(m.id)}
-                  />
-                ))}
-            </ul>
-          </div>
-        </>
-      )}
-      </div>
-
-      <button
-        type="button"
-        className="sidebar-collapse-tab"
-        onClick={onToggleCollapsed}
-        title="Collapse sidebar (⌘\\)"
-        aria-label="Collapse sidebar"
-      >
-        ‹
-      </button>
-    </aside>
-  );
-}
-
 function WelcomeScreen({
   recentFiles,
   busy,
@@ -1408,12 +1173,10 @@ function CrossYearView({
   data,
   loading,
   onJumpToYear,
-  onBackToDashboard,
 }: {
   data: CrossYearOverview | null;
   loading: boolean;
   onJumpToYear: (yearId: number) => void;
-  onBackToDashboard: () => void;
 }) {
   // Page tracking state mirrors BudgetDashboard's strip — no
   // selectedYear concept here so we don't need the auto-anchor
@@ -1482,13 +1245,6 @@ function CrossYearView({
               sidebar to start a multi-year comparison.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn ghost cross-year-back"
-            onClick={onBackToDashboard}
-          >
-            ← Back to dashboard
-          </button>
         </header>
       </div>
     );
@@ -1533,13 +1289,6 @@ function CrossYearView({
             Click a column header to open that year's overview.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn ghost cross-year-back"
-          onClick={onBackToDashboard}
-        >
-          ← Back to dashboard
-        </button>
       </header>
 
       <section className="card cross-year-totals-card">
@@ -2438,7 +2187,7 @@ function MonthBudgetView({
         </div>
       </section>
 
-      <section className="card">
+      <section className="card" id="section-income">
         <h2>Income</h2>
         <table className="data-table budget-line-table">
           <colgroup>
@@ -2462,6 +2211,7 @@ function MonthBudgetView({
               <IncomeLineBlock
                 key={line.id}
                 line={line}
+                budgetYearMonth={view.yearMonth}
                 expanded={expandedIncome.has(line.id)}
                 onToggle={() => onToggleIncome(line.id)}
                 onRefresh={onRefresh}
@@ -2490,7 +2240,7 @@ function MonthBudgetView({
         </button>
       </div>
       {view.expenseBuckets.map((bucket) => (
-        <section key={bucket.id} className="card bucket-card">
+        <section key={bucket.id} className="card bucket-card" id={`section-bucket-${bucket.id}`}>
           <div className="bucket-header">
             <h2>{bucket.name}</h2>
           </div>
@@ -2516,6 +2266,7 @@ function MonthBudgetView({
                 <ExpenseLineBlock
                   key={line.id}
                   line={line}
+                  budgetYearMonth={view.yearMonth}
                   expanded={expandedExpense.has(line.id)}
                   onToggle={() => onToggleExpense(line.id)}
                   onRefresh={onRefresh}
@@ -2713,6 +2464,11 @@ export default function App() {
       return n;
     });
   };
+
+  useEffect(() => {
+    setExpandedIncome(new Set());
+    setExpandedExpense(new Set());
+  }, [view]);
 
   const refreshMonthView = useCallback(async (monthId: number) => {
     setError(null);
@@ -4433,12 +4189,26 @@ export default function App() {
           months={months}
           view={view}
           sidebarYearId={sidebarYearId}
+          monthSections={
+            view.kind === "month" && monthView && monthView.monthId === view.monthId
+              ? [
+                  { id: "section-income", label: "Income" },
+                  ...monthView.expenseBuckets.map((b) => ({
+                    id: `section-bucket-${b.id}`,
+                    label: b.name,
+                  })),
+                ]
+              : undefined
+          }
           onSelectYear={(id) => void enterYear(id)}
           onBackToYears={exitYear}
           onShowYearOverview={(id) => {
             void enterYear(id);
           }}
           onActivateMonth={(id) => void activateMonth(id)}
+          onScrollToSection={(elementId) => {
+            document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
         />
       )}
 
@@ -4673,7 +4443,6 @@ export default function App() {
               data={crossYear}
               loading={crossYearLoading}
               onJumpToYear={(id) => void enterYear(id)}
-              onBackToDashboard={exitYear}
             />
           )}
 
@@ -4779,12 +4548,14 @@ function SummaryRow({
 
 function IncomeLineBlock({
   line,
+  budgetYearMonth,
   expanded,
   onToggle,
   onRefresh,
   onOpenYtd,
 }: {
   line: IncomeLineDto;
+  budgetYearMonth: string;
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
@@ -4823,7 +4594,9 @@ function IncomeLineBlock({
             invalid={parseError}
           />
         </td>
-        <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
+        <td className="num clickable-cell" onClick={onToggle} title="Show entries">
+          {formatUsd(line.actualCents, "rounded")}
+        </td>
         <td className={`num ${varianceClassIncome(line.varianceCents)}`}>
           {formatUsd(line.varianceCents, "rounded")}
         </td>
@@ -4848,7 +4621,7 @@ function IncomeLineBlock({
       {expanded && (
         <tr className="detail-row">
           <td colSpan={5}>
-            <IncomeEntriesPanel lineId={line.id} entries={line.entries} onDone={onRefresh} />
+            <IncomeEntriesPanel lineId={line.id} entries={line.entries} budgetYearMonth={budgetYearMonth} onDone={onRefresh} />
           </td>
         </tr>
       )}
@@ -4859,15 +4632,18 @@ function IncomeLineBlock({
 function IncomeEntriesPanel({
   lineId,
   entries,
+  budgetYearMonth,
   onDone,
 }: {
   lineId: number;
   entries: IncomeLineDto["entries"];
+  budgetYearMonth: string;
   onDone: () => void;
 }) {
   const [label, setLabel] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
+  const [justAdded, setJustAdded] = useState(false);
 
   const add = async () => {
     const c = parseMoneyToCents(amount);
@@ -4880,12 +4656,22 @@ function IncomeEntriesPanel({
     });
     setLabel("");
     setAmount("");
+    setDate("");
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 700);
     await onDone();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void add();
+    }
   };
 
   return (
     <div className="detail-panel">
-      <div className="detail-toolbar">
+      <div className={`detail-toolbar${justAdded ? " just-added" : ""}`} onKeyDown={onKeyDown}>
         <input
           className="input"
           placeholder="Label"
@@ -4900,9 +4686,9 @@ function IncomeEntriesPanel({
           onChange={(e) => setAmount(e.target.value)}
           onFocus={selectAllOnFocus}
         />
-        <DateField value={date} onChange={setDate} ariaLabel="Received on" />
-        <button type="button" className="btn secondary" onClick={() => void add()}>
-          Add entry
+        <DateField value={date} onChange={setDate} ariaLabel="Received on" fixedMonthYear={{ mm: budgetYearMonth.slice(5, 7), yyyy: budgetYearMonth.slice(0, 4) }} />
+        <button type="button" className={`btn ${justAdded ? "primary" : "secondary"}`} onClick={() => void add()}>
+          {justAdded ? "Added ✓" : "Add entry"}
         </button>
       </div>
       <ul className="entry-list">
@@ -4928,6 +4714,7 @@ function IncomeEntriesPanel({
 
 function ExpenseLineBlock({
   line,
+  budgetYearMonth,
   expanded,
   onToggle,
   onRefresh,
@@ -4936,6 +4723,7 @@ function ExpenseLineBlock({
   onOpenYtd,
 }: {
   line: ExpenseLineDto;
+  budgetYearMonth: string;
   expanded: boolean;
   onToggle: () => void;
   onRefresh: () => void;
@@ -4998,7 +4786,9 @@ function ExpenseLineBlock({
             invalid={parseError}
           />
         </td>
-        <td className="num">{formatUsd(line.actualCents, "rounded")}</td>
+        <td className="num clickable-cell" onClick={onToggle} title="Show transactions">
+          {formatUsd(line.actualCents, "rounded")}
+        </td>
         <td className={`num ${varianceClassExpense(line.varianceCents)}`}>
           {formatUsd(line.varianceCents, "rounded")}
         </td>
@@ -5036,7 +4826,7 @@ function ExpenseLineBlock({
       {expanded && (
         <tr className="detail-row">
           <td colSpan={5}>
-            <TransactionsPanel lineId={line.id} txs={line.transactions} onDone={onRefresh} />
+            <TransactionsPanel lineId={line.id} txs={line.transactions} budgetYearMonth={budgetYearMonth} onDone={onRefresh} />
           </td>
         </tr>
       )}
@@ -5047,15 +4837,18 @@ function ExpenseLineBlock({
 function TransactionsPanel({
   lineId,
   txs,
+  budgetYearMonth,
   onDone,
 }: {
   lineId: number;
   txs: ExpenseLineDto["transactions"];
+  budgetYearMonth: string;
   onDone: () => void;
 }) {
   const [payee, setPayee] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
+  const [justAdded, setJustAdded] = useState(false);
 
   const add = async () => {
     const c = parseMoneyToCents(amount);
@@ -5068,12 +4861,22 @@ function TransactionsPanel({
     });
     setPayee("");
     setAmount("");
+    setDate("");
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 700);
     await onDone();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void add();
+    }
   };
 
   return (
     <div className="detail-panel">
-      <div className="detail-toolbar">
+      <div className={`detail-toolbar${justAdded ? " just-added" : ""}`} onKeyDown={onKeyDown}>
         <input
           className="input"
           placeholder="Payee"
@@ -5088,9 +4891,9 @@ function TransactionsPanel({
           onChange={(e) => setAmount(e.target.value)}
           onFocus={selectAllOnFocus}
         />
-        <DateField value={date} onChange={setDate} ariaLabel="Occurred on" />
-        <button type="button" className="btn secondary" onClick={() => void add()}>
-          Add transaction
+        <DateField value={date} onChange={setDate} ariaLabel="Occurred on" fixedMonthYear={{ mm: budgetYearMonth.slice(5, 7), yyyy: budgetYearMonth.slice(0, 4) }} />
+        <button type="button" className={`btn ${justAdded ? "primary" : "secondary"}`} onClick={() => void add()}>
+          {justAdded ? "Added ✓" : "Add transaction"}
         </button>
       </div>
       <ul className="entry-list">

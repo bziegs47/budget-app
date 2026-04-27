@@ -364,6 +364,16 @@ body {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.65rem;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.35rem;
+  margin: -0.35rem -0.35rem 0.3rem;
+}
+
+.detail-toolbar.just-added {
+  border-color: rgba(62, 207, 142, 0.5);
+  box-shadow: 0 0 0 2px rgba(62, 207, 142, 0.15);
 }
 
 .entry-list {
@@ -556,8 +566,13 @@ body {
   width: 7.5rem;
 }
 
+.budget-line-table th.num,
+.budget-line-table td.num {
+  text-align: center;
+}
+
 .budget-line-table .col-actions {
-  width: 5.5rem;
+  width: 7.5rem;
 }
 
 /* Inside the table, make the planned-amount input fill its column
@@ -567,7 +582,7 @@ body {
   display: flex;
   width: 100%;
   min-width: 0;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .budget-line-table .currency-field .input-money {
@@ -580,6 +595,15 @@ body {
    "Rent / mortgage"); allow it to wrap rather than blow up the row. */
 .budget-line-table td:first-child {
   overflow-wrap: anywhere;
+}
+
+.budget-line-table .clickable-cell {
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.budget-line-table .clickable-cell:hover {
+  color: var(--accent);
 }
 
 .bucket-header {
@@ -638,404 +662,6 @@ body {
 
 .app-layout.sidebar-hidden {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.sidebar {
-  position: sticky;
-  top: 0;
-  align-self: start;
-  height: 100vh;
-  padding: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: visible; /* allow the edge tab to spill onto main content */
-}
-
-.sidebar.collapsed {
-  padding: 0;
-}
-
-.sidebar-header {
-  flex: 0 0 auto;
-  padding: 0.85rem 0.85rem 0.5rem;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  min-height: 1.5rem;
-}
-
-.sidebar-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0 0.85rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-/* Edge tab: visually attached to the right border of the sidebar so it reads
-   as a tab on the divider rather than a free-floating button. */
-.sidebar-collapse-tab {
-  position: absolute;
-  top: 18px;
-  right: -13px;
-  width: 26px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0;
-  z-index: 10;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-.sidebar-collapse-tab:hover,
-.sidebar-collapse-tab:focus-visible {
-  background: var(--surface-2);
-  color: var(--text);
-  outline: none;
-}
-
-.sidebar.collapsed .sidebar-collapse-tab {
-  /* Keep tab in a comfortable spot when sidebar is the narrow rail */
-  top: 18px;
-}
-
-.sidebar-eyebrow {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  padding: 0.3rem 0.4rem;
-}
-
-/* Workspace identification chip at the very top of the sidebar. Reads as
-   the "you opened: ___" label and stays visually subordinate to the section
-   titles below so navigation still leads the eye. The bottom border acts as
-   a page break separating workspace identity from in-workspace navigation. */
-.sidebar-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding: 0.1rem 0.4rem 0.7rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 0.9rem;
-}
-
-.sidebar-workspace-eyebrow {
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-}
-
-.sidebar-workspace-title {
-  font-size: 0.92rem;
-  font-weight: 650;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 220px;
-}
-
-.sidebar-workspace.is-placeholder .sidebar-workspace-title {
-  color: var(--muted);
-  font-style: italic;
-  font-weight: 500;
-}
-
-/* The "Years" tree-root label sits beneath the workspace chip + page break.
-   Reset its top margin so the chip's `margin-bottom` controls the gap below
-   the page break rather than stacking another margin on top. */
-.sidebar-eyebrow-title {
-  margin-top: 0;
-}
-
-.sidebar-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 0.3rem 0.5rem;
-  cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease,
-    color 0.12s ease;
-}
-
-.sidebar-back:hover,
-.sidebar-back:focus-visible {
-  background: var(--surface-2);
-  border-color: var(--border);
-  color: var(--text);
-  outline: none;
-}
-
-.sidebar-year {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.55rem 0.6rem;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: var(--surface-2);
-  cursor: pointer;
-}
-
-.sidebar-year.active {
-  border-color: rgba(91, 140, 255, 0.35);
-  background: rgba(91, 140, 255, 0.10);
-}
-
-.sidebar-year-main {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* "YEAR" header above the year value — reads as the primary location label
-   ("you are here"), so it gets the same prominent blue treatment as the
-   "Months" section title below the divider. */
-.sidebar-year-eyebrow {
-  font-size: 0.95rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: #8aaaff;
-}
-
-.sidebar-year-label {
-  font-weight: 650;
-  font-size: 1rem;
-  /* Mirror the indent of `.sidebar-month-list.nested` so the year value reads
-     as a child of the "YEAR" header, matching the Month name → Months pattern. */
-  padding-left: 0.65rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-}
-
-.year-label-form {
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.year-label-input {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  padding: 0.25rem 0.45rem;
-  font: inherit;
-  font-weight: 650;
-  width: 100%;
-}
-
-.icon-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--muted);
-  padding: 0.3rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.icon-btn:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-
-.icon-btn.small {
-  padding: 0.2rem;
-}
-
-.icon-btn.ghost {
-  background: transparent;
-  border-color: transparent;
-}
-
-.sidebar-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-/* Soft "page break" between the year identity (Year / 2026) and the working
-   navigation (Year overview, Months, Custom periods). A single hairline rule
-   reads as a divider without adding visual weight. */
-.sidebar-divider {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 0.65rem 0.25rem;
-  height: 0;
-  opacity: 0.7;
-}
-
-.sidebar-section-header {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  padding: 0 0.25rem;
-}
-
-/* Section title for groups inside the sidebar (e.g. "Months", "Custom periods").
-   Uses the app's accent blue (slightly lifted) so the group reads as a real
-   header that ties into the brand instead of fading into the muted eyebrows. */
-.sidebar-section-title {
-  margin: 0.75rem 0 0.25rem;
-  padding: 0 0.35rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: #8aaaff; /* Lighter sibling of var(--accent) — visible on the dark
-                     surface without competing with primary text. */
-}
-
-.sidebar-section-title.subtle {
-  color: var(--muted);
-  font-weight: 600;
-  font-size: 0.78rem;
-  letter-spacing: 0.1em;
-}
-
-.sidebar-month-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* Visually nest items beneath their section title. Indent applies only to
-   the rows themselves; the active highlight still spans nicely thanks to the
-   row's own border-radius. */
-.sidebar-month-list.nested {
-  padding-left: 0.65rem;
-}
-
-.sidebar-empty {
-  font-size: 0.78rem;
-  padding: 0.3rem 0.5rem;
-}
-
-.sidebar-month-row {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 0.1rem;
-}
-
-.sidebar-month-row:hover {
-  background: var(--surface-2);
-}
-
-.sidebar-month-row.active {
-  background: rgba(91, 140, 255, 0.12);
-  border-color: rgba(91, 140, 255, 0.35);
-}
-
-.sidebar-month-main {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.05rem;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 0.4rem 0.5rem;
-}
-
-.sidebar-month-label {
-  font-weight: 600;
-  font-size: 0.88rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-}
-
-.sidebar-month-range {
-  font-size: 0.7rem;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.sidebar-section-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 0.25rem;
-}
-
-.sidebar-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: transparent;
-  border: 1px dashed var(--border);
-  border-radius: 7px;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.82rem;
-  padding: 0.4rem 0.55rem;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sidebar-action:hover:not(:disabled) {
-  background: var(--surface-2);
-  color: var(--text);
-  border-style: solid;
-}
-
-.sidebar-action:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 /* Main pane (header + content) */

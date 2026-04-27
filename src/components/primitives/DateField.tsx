@@ -32,10 +32,15 @@ export function DateField({
   value,
   onChange,
   ariaLabel = "Date",
+  defaultYear,
+  fixedMonthYear,
 }: {
   value: string;
   onChange: (iso: string) => void;
   ariaLabel?: string;
+  defaultYear?: string;
+  /** When set, MM and YYYY are shown as static text and only DD is editable. */
+  fixedMonthYear?: { mm: string; yyyy: string };
 }) {
   const [parts, setParts] = useState<DateParts>(() => isoToParts(value));
   const partsRef = useRef<DateParts>(parts);
@@ -48,10 +53,17 @@ export function DateField({
   const justAdvancedRef = useRef(false);
 
   useEffect(() => {
+    if (fixedMonthYear) {
+      if (!value) {
+        partsRef.current = { mm: fixedMonthYear.mm, dd: "", yyyy: fixedMonthYear.yyyy };
+        setParts(partsRef.current);
+      }
+      return;
+    }
     const next = isoToParts(value);
     partsRef.current = next;
     setParts(next);
-  }, [value]);
+  }, [value, fixedMonthYear]);
 
   const emit = useCallback(
     (next: DateParts) => {
@@ -81,7 +93,10 @@ export function DateField({
     nextRef: React.RefObject<HTMLInputElement | null> | null,
   ) => {
     const digits = raw.replace(/\D/g, "").slice(0, maxLen);
-    const next = { ...partsRef.current, [seg]: digits };
+    let next = { ...partsRef.current, [seg]: digits };
+    if (seg === "dd" && digits.length === maxLen && defaultYear && next.yyyy === "") {
+      next = { ...next, yyyy: defaultYear };
+    }
     update(next);
     if (digits.length === maxLen && nextRef?.current) {
       justAdvancedRef.current = true;
@@ -125,7 +140,10 @@ export function DateField({
       e.preventDefault();
       const cur = partsRef.current[seg];
       const padded = seg !== "yyyy" && cur.length === 1 ? `0${cur}` : cur;
-      const next = { ...partsRef.current, [seg]: padded };
+      let next = { ...partsRef.current, [seg]: padded };
+      if (seg === "dd" && defaultYear && next.yyyy === "") {
+        next = { ...next, yyyy: defaultYear };
+      }
       update(next);
       nextRef.current.focus();
       nextRef.current.select();
@@ -159,8 +177,59 @@ export function DateField({
 
   const clear = () => {
     update({ mm: "", dd: "", yyyy: "" });
-    mmRef.current?.focus();
+    ddRef.current?.focus();
   };
+
+  const onFixedDdChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, "").slice(0, 2);
+    const display: DateParts = { mm: fixedMonthYear!.mm, dd: digits, yyyy: fixedMonthYear!.yyyy };
+    partsRef.current = display;
+    setParts(display);
+    if (digits === "") {
+      if (value !== "") onChange("");
+    } else {
+      const padded = digits.length === 1 ? `0${digits}` : digits;
+      const iso = partsToIso({ mm: fixedMonthYear!.mm, dd: padded, yyyy: fixedMonthYear!.yyyy });
+      if (iso && iso !== value) onChange(iso);
+    }
+  };
+
+  if (fixedMonthYear) {
+    const displayDd = parts.dd;
+    const hasDay = displayDd !== "";
+    return (
+      <div className="date-field date-field-fixed" role="group" aria-label={ariaLabel} ref={rootRef}>
+        <span className="date-seg date-seg-fixed">{fixedMonthYear.mm}</span>
+        <span className="date-sep" aria-hidden="true">/</span>
+        <input
+          ref={ddRef}
+          className="date-seg date-seg-dd"
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="DD"
+          aria-label="Day"
+          maxLength={2}
+          value={displayDd}
+          onChange={(e) => onFixedDdChange(e.target.value)}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+        <span className="date-sep" aria-hidden="true">/</span>
+        <span className="date-seg date-seg-fixed">{fixedMonthYear.yyyy}</span>
+        {hasDay && (
+          <button
+            type="button"
+            className="date-clear"
+            onClick={clear}
+            title="Clear date"
+            aria-label="Clear date"
+          >
+            ×
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const hasAny = parts.mm !== "" || parts.dd !== "" || parts.yyyy !== "";
 
