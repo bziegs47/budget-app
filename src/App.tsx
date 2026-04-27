@@ -1173,12 +1173,10 @@ function CrossYearView({
   data,
   loading,
   onJumpToYear,
-  onBackToDashboard,
 }: {
   data: CrossYearOverview | null;
   loading: boolean;
   onJumpToYear: (yearId: number) => void;
-  onBackToDashboard: () => void;
 }) {
   // Page tracking state mirrors BudgetDashboard's strip — no
   // selectedYear concept here so we don't need the auto-anchor
@@ -1247,13 +1245,6 @@ function CrossYearView({
               sidebar to start a multi-year comparison.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn ghost cross-year-back"
-            onClick={onBackToDashboard}
-          >
-            ← Back to dashboard
-          </button>
         </header>
       </div>
     );
@@ -1298,13 +1289,6 @@ function CrossYearView({
             Click a column header to open that year's overview.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn ghost cross-year-back"
-          onClick={onBackToDashboard}
-        >
-          ← Back to dashboard
-        </button>
       </header>
 
       <section className="card cross-year-totals-card">
@@ -2203,7 +2187,7 @@ function MonthBudgetView({
         </div>
       </section>
 
-      <section className="card">
+      <section className="card" id="section-income">
         <h2>Income</h2>
         <table className="data-table budget-line-table">
           <colgroup>
@@ -2256,7 +2240,7 @@ function MonthBudgetView({
         </button>
       </div>
       {view.expenseBuckets.map((bucket) => (
-        <section key={bucket.id} className="card bucket-card">
+        <section key={bucket.id} className="card bucket-card" id={`section-bucket-${bucket.id}`}>
           <div className="bucket-header">
             <h2>{bucket.name}</h2>
           </div>
@@ -4205,12 +4189,26 @@ export default function App() {
           months={months}
           view={view}
           sidebarYearId={sidebarYearId}
+          monthSections={
+            view.kind === "month" && monthView && monthView.monthId === view.monthId
+              ? [
+                  { id: "section-income", label: "Income" },
+                  ...monthView.expenseBuckets.map((b) => ({
+                    id: `section-bucket-${b.id}`,
+                    label: b.name,
+                  })),
+                ]
+              : undefined
+          }
           onSelectYear={(id) => void enterYear(id)}
           onBackToYears={exitYear}
           onShowYearOverview={(id) => {
             void enterYear(id);
           }}
           onActivateMonth={(id) => void activateMonth(id)}
+          onScrollToSection={(elementId) => {
+            document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
         />
       )}
 
@@ -4445,7 +4443,6 @@ export default function App() {
               data={crossYear}
               loading={crossYearLoading}
               onJumpToYear={(id) => void enterYear(id)}
-              onBackToDashboard={exitYear}
             />
           )}
 

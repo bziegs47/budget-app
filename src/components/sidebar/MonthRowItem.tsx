@@ -19,10 +19,10 @@ export function MonthRowItem({
       ? MONTH_NAMES_FULL[row.calendarMonth - 1]
       : row.tabLabel;
   return (
-    <li className={`sidebar-month-row ${active ? "active" : ""}`}>
+    <div className={`sidebar-month-row ${active ? "active" : ""}`}>
       <button type="button" className="sidebar-month-main" onClick={onActivate}>
         <span className="sidebar-month-label">{monthLabel}</span>
       </button>
-    </li>
+    </div>
   );
 }
