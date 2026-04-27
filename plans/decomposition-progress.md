@@ -12,7 +12,7 @@ what's landed, what's next, and the running line counts.
 | 2 | Primitive widgets → `components/primitives/` | 6,987 | 2,921 | [#12](https://github.com/bziegs47/budget-app/pull/12) |
 | 3 | Focus-trap hook + leaf modals → `components/modals/` | 6,553 | 2,853 | [#13](https://github.com/bziegs47/budget-app/pull/13) |
 | 4 | Workspace + year/month modals → `components/modals/` | 5,115 | 2,546 | [#14](https://github.com/bziegs47/budget-app/pull/14) |
-| 5 | Sidebar + UX polish (in progress) | 4,918 | 2,172 | [#15](https://github.com/bziegs47/budget-app/pull/15) |
+| 5 | Sidebar + UX polish | 4,918 | 2,172 | [#15](https://github.com/bziegs47/budget-app/pull/15) |
 | 6 | Standalone views | — | — | pending |
 | 7 | MonthBudgetView + row blocks | — | — | pending |
 | 8 | IPC wrappers | — | — | pending |
@@ -48,8 +48,6 @@ Extracted to `src/components/modals/`:
   `DuplicateYearModal`
 - Helper types (`ExpenseLineEditConfig`, `PasswordModalKind`,
   `PreferenceSectionId`) moved with their owning component.
-
-## In progress
 
 ### Phase 5 — Sidebar + UX polish
 Extracted to `src/components/sidebar/`:
