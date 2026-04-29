@@ -13,7 +13,7 @@ what's landed, what's next, and the running line counts.
 | 3 | Focus-trap hook + leaf modals → `components/modals/` | 6,553 | 2,853 | [#13](https://github.com/bziegs47/budget-app/pull/13) |
 | 4 | Workspace + year/month modals → `components/modals/` | 5,115 | 2,546 | [#14](https://github.com/bziegs47/budget-app/pull/14) |
 | 5 | Sidebar + UX polish | 4,918 | 2,172 | [#15](https://github.com/bziegs47/budget-app/pull/15) |
-| 6 | Standalone views | — | — | pending |
+| 6 | Standalone views → `views/` | 2,933 | 2,172 | [#16](https://github.com/bziegs47/budget-app/pull/16) |
 | 7 | MonthBudgetView + row blocks | — | — | pending |
 | 8 | IPC wrappers | — | — | pending |
 | 9 | App-level hooks | — | — | pending |
@@ -72,15 +72,23 @@ Additional scope bundled into this branch:
   - Money columns centered under headers in budget line tables
   - Actions column widened to prevent icon overflow
 
+### Phase 6 — Standalone views (~1,985 LOC)
+Extracted to `src/views/`:
+- `WelcomeScreen`, `YearEndNudge`, `BudgetDashboard`
+  (+`BudgetDashboardSnapshot`), `LibraryView`, `YearOverviewView`,
+  `CrossYearView` (+`CrossYearMatrix`, `aggregateLineRows`),
+  `MonthlyBarsChart`, `YtdSlideOver`, `ReportsView`, `YtdDualStrip`
+- Shared helpers (`varianceClassIncome`, `varianceClassExpense`,
+  `selectAllOnFocus`, `basename`, `formatRelative`) extracted to
+  `src/views/helpers.ts`
+- Barrel file at `src/views/index.ts`
+
 ## Next up
 
-### Phase 6 — Standalone views (~1,200 LOC)
-`WelcomeScreen`, `LibraryView`, `BudgetDashboard`, `YearOverviewView`,
-`CrossYearView`, `CrossYearMatrix`, `MonthlyBarsChart`, `YtdSlideOver`,
-`YtdDualStrip`, `ReportsView`, `YearEndNudge`.
-
 ### Phase 7 — MonthBudgetView + row blocks (~900 LOC)
-Largest single view. Extract into a folder with sibling row blocks.
+Largest single view. Extract into a folder with sibling row blocks:
+`MonthBudgetView`, `SummaryRow`, `IncomeLineBlock`,
+`IncomeEntriesPanel`, `ExpenseLineBlock`, `TransactionsPanel`.
 
 ### Phase 8 — IPC wrappers (~200 LOC)
 Typed wrappers for `invoke` and `listen` calls.
