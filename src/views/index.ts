@@ -16,3 +16,4 @@ export { MonthlyBarsChart } from "./MonthlyBarsChart";
 export { YtdSlideOver } from "./YtdSlideOver";
 export { ReportsView } from "./ReportsView";
 export { YtdDualStrip } from "./YtdDualStrip";
+export { MonthBudgetView } from "./MonthBudgetView";
