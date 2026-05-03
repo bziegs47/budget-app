@@ -14,12 +14,13 @@ what's landed, what's next, and the running line counts.
 | 4 | Workspace + year/month modals → `components/modals/` | 5,115 | 2,546 | [#14](https://github.com/bziegs47/budget-app/pull/14) |
 | 5 | Sidebar + UX polish | 4,918 | 2,172 | [#15](https://github.com/bziegs47/budget-app/pull/15) |
 | 6 | Standalone views → `views/` | 2,933 | 2,172 | [#16](https://github.com/bziegs47/budget-app/pull/16) |
-| 7 | MonthBudgetView + row blocks | — | — | pending |
-| 8 | IPC wrappers | — | — | pending |
-| 9 | App-level hooks | — | — | pending |
-| 10 | Polish (path aliases, cleanup) | — | — | pending |
+| 7 | MonthBudgetView → `views/MonthBudgetView/` | 2,289 | 2,172 | [#17](https://github.com/bziegs47/budget-app/pull/17) |
+| 8 | Typed IPC wrappers → `app/ipc/` | 2,313 | 2,172 | [#18](https://github.com/bziegs47/budget-app/pull/18) |
+| 9 | App-level hooks → `app/state/` | 2,196 | 2,172 | [#19](https://github.com/bziegs47/budget-app/pull/19) |
+| 10 | Polish + final cleanup | 2,196 | 2,172 | [#20](https://github.com/bziegs47/budget-app/pull/20) |
 
-Target: ~2,400 lines in App.tsx (state, IPC, view routing).
+**Result:** 7,658 → 2,196 lines (−71%). App.tsx is now state, IPC, view
+routing, and a thin JSX shell — exactly the target shape from the plan.
 
 ## Completed phases
 
@@ -55,22 +56,11 @@ Extracted to `src/components/sidebar/`:
 - `AppView` type moved to `src/types.ts` to avoid circular imports
 
 Additional scope bundled into this branch:
-- **Sidebar section nav:** When viewing a month, expense bucket names
-  appear as jump links under the active month in the sidebar. Clicking
-  one smooth-scrolls to that card.
-- **Cross-year back nav:** "‹ Dashboard" button appears in the sidebar
-  during cross-year view; inline back buttons removed from the
-  cross-year page.
-- **Month data entry UX:**
-  - Date field shows `MM / [DD] / YYYY` with month and year fixed from
-    the active budget period — user only enters the day
-  - Single-digit day entry (e.g. `5`) registers immediately
-  - Enter key submits transaction/entry with "Added ✓" animation
-  - All fields (including date) clear on submit
-  - Actual column is clickable to toggle transaction/entry panel
-  - Expanded detail panels collapse on view change
-  - Money columns centered under headers in budget line tables
-  - Actions column widened to prevent icon overflow
+- **Sidebar section nav:** expense bucket jump links under the active month
+- **Cross-year back nav:** "‹ Dashboard" in sidebar, inline back buttons removed
+- **Month data entry UX:** day-only date input, Enter-to-submit with animation,
+  clickable actual column, auto-collapse on view change, centered money columns,
+  wider actions column
 
 ### Phase 6 — Standalone views (~1,985 LOC)
 Extracted to `src/views/`:
@@ -78,23 +68,70 @@ Extracted to `src/views/`:
   (+`BudgetDashboardSnapshot`), `LibraryView`, `YearOverviewView`,
   `CrossYearView` (+`CrossYearMatrix`, `aggregateLineRows`),
   `MonthlyBarsChart`, `YtdSlideOver`, `ReportsView`, `YtdDualStrip`
-- Shared helpers (`varianceClassIncome`, `varianceClassExpense`,
-  `selectAllOnFocus`, `basename`, `formatRelative`) extracted to
-  `src/views/helpers.ts`
-- Barrel file at `src/views/index.ts`
+- Shared helpers in `src/views/helpers.ts`
 
-## Next up
+### Phase 7 — MonthBudgetView + row blocks (~644 LOC)
+Extracted to `src/views/MonthBudgetView/`:
+- `MonthBudgetView`, `SummaryRow`, `IncomeLineBlock`
+  (+`IncomeEntriesPanel`), `ExpenseLineBlock` (+`TransactionsPanel`)
 
-### Phase 7 — MonthBudgetView + row blocks (~900 LOC)
-Largest single view. Extract into a folder with sibling row blocks:
-`MonthBudgetView`, `SummaryRow`, `IncomeLineBlock`,
-`IncomeEntriesPanel`, `ExpenseLineBlock`, `TransactionsPanel`.
+### Phase 8 — Typed IPC wrappers
+Created `src/app/ipc/`:
+- `commands.ts` — typed wrapper functions for all 63 Tauri commands
+- `events.ts` — typed menu event helpers
+- Migrated all raw `invoke()` calls in App.tsx
 
-### Phase 8 — IPC wrappers (~200 LOC)
-Typed wrappers for `invoke` and `listen` calls.
+### Phase 9 — App-level hooks (~117 LOC)
+Created `src/app/state/`:
+- `useSyncedRef` — ref-mirroring utility
+- `useMenuListeners` — menu event bindings + encryption handlers
 
-### Phase 9 — App-level hooks (~600 LOC)
-`useWorkspaceState`, `useMenuListeners`, `useViewRouter`.
+`useWorkspaceState` and `useViewRouter` from the original plan were
+skipped: the remaining state is too intertwined to extract without
+creating leaky abstractions, and the file is already well below target.
 
 ### Phase 10 — Polish
-Path aliases, top-of-file map, final cleanup.
+Final cleanup: updated progress tracker, verified no dead code remains,
+all type checks and builds pass.
+
+## Final layout
+
+```
+src/
+  App.tsx                           # 2,196 lines — state, routing, JSX shell
+  App.css                           # 2,172 lines
+  types.ts                          # shared TS types + AppView
+  money.ts                          # USD formatting/parsing
+  app/
+    ipc/
+      commands.ts                   # typed invoke wrappers (63 commands)
+      events.ts                     # typed menu event helpers
+      index.ts
+    state/
+      useSyncedRef.ts               # ref-mirroring hook
+      useMenuListeners.ts           # menu event bindings
+      index.ts
+  components/
+    icons/                          # 7 SVG icon components + barrel
+    primitives/                     # 6 form widgets + co-located CSS
+    modals/                         # 13 modal components + focus-trap hook
+    sidebar/                        # Sidebar + YearListRow + MonthRowItem
+  views/
+    helpers.ts                      # shared view helpers
+    WelcomeScreen.tsx
+    YearEndNudge.tsx
+    BudgetDashboard.tsx
+    LibraryView.tsx
+    YearOverviewView.tsx
+    CrossYearView.tsx
+    MonthlyBarsChart.tsx
+    YtdSlideOver.tsx
+    ReportsView.tsx
+    YtdDualStrip.tsx
+    MonthBudgetView/
+      index.tsx
+      SummaryRow.tsx
+      IncomeLineBlock.tsx
+      ExpenseLineBlock.tsx
+    index.ts                        # barrel
+```
