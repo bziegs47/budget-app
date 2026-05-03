@@ -6,10 +6,64 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  addExpenseLine,
+  createYear,
+  createYearWorkspace,
+  decryptWorkspace,
+  deleteExpenseLine,
+  deleteWorkspaceFile,
+  deleteYear,
+  duplicateYear,
+  encryptWorkspace,
+  changeWorkspacePassword,
+  encryptionSupported,
+  ensureYearMonths,
+  exportCsvData,
+  exportMonthCsv,
+  exportMonthCsvRedacted,
+  exportMonthJson,
+  exportMonthJsonRedacted,
+  exportWorkspaceCsvRedacted,
+  exportWorkspaceJson,
+  exportWorkspaceJsonRedacted,
+  exportYearCsvRedacted,
+  exportYearJsonRedacted,
+  getAutoSave,
+  getCrossYearOverview,
+  getDatabasePath,
+  getLibraryIndex,
+  getLineCalendarReport,
+  getMonthView,
+  getSettings,
+  getWorkspaceMeta,
+  getYearOverview,
+  hasOpenBudget,
+  importWorkspace,
+  isDirty,
+  listMonths,
+  listMonthsForYear,
+  listYears,
+  openBudgetInCurrentWindow,
+  openBudgetInNewWindow,
+  renameExpenseLine,
+  renameWorkspaceFile,
+  renameYear,
+  reorderBuckets as reorderBucketsCmd,
+  revealDefaultFolder,
+  saveSnapshot,
+  saveBudgetAs,
+  scanLibrary,
+  setAutoSave,
+  setMenuContext,
+  setSidebarCollapsed as setSidebarCollapsedCmd,
+  unlockWorkspace,
+  updateExpenseLineFlags,
+  workspaceIsEncrypted,
+} from "./app/ipc";
 import type {
   AppSettings,
   AppView,
@@ -198,12 +252,12 @@ export default function App() {
     }
     let cancelled = false;
     setYtdLoading(true);
-    void invoke<LineCalendarReport>("get_line_calendar_report", {
-      year: ytdDrawer.year,
-      lineKind: ytdDrawer.lineKind,
-      lineIdentity: ytdDrawer.lineIdentity,
-      asOf: ytdDrawer.asOf,
-    })
+    void getLineCalendarReport(
+      ytdDrawer.year,
+      ytdDrawer.lineKind,
+      ytdDrawer.lineIdentity,
+      ytdDrawer.asOf,
+    )
       .then((r) => {
         if (!cancelled) setYtdReport(r);
       })
@@ -252,14 +306,14 @@ export default function App() {
 
   const refreshMonthView = useCallback(async (monthId: number) => {
     setError(null);
-    const v = await invoke<MonthView>("get_month_view", { monthId });
+    const v = await getMonthView(monthId);
     setMonthView(v);
   }, []);
 
   const refreshOverview = useCallback(async (yearId?: number | null) => {
     setError(null);
     const target = yearId === undefined ? sidebarYearIdRef.current : yearId;
-    const o = await invoke<YearOverview>("get_year_overview", { yearId: target ?? null });
+    const o = await getYearOverview(target ?? null);
     setYearOverview(o);
   }, []);
 
@@ -267,22 +321,22 @@ export default function App() {
     const target = yearId === undefined ? sidebarYearIdRef.current : yearId;
     let list: MonthRow[];
     if (target != null) {
-      list = await invoke<MonthRow[]>("list_months_for_year", { yearId: target });
+      list = await listMonthsForYear(target);
     } else {
-      list = await invoke<MonthRow[]>("list_months");
+      list = await listMonths();
     }
     setMonths(list);
     return list;
   }, []);
 
   const refreshYears = useCallback(async () => {
-    const list = await invoke<YearRow[]>("list_years");
+    const list = await listYears();
     setYears(list);
     return list;
   }, []);
 
   const refreshSettings = useCallback(async () => {
-    const s = await invoke<AppSettings>("get_settings");
+    const s = await getSettings();
     setSettings(s);
     setSidebarCollapsed(Boolean(s.sidebarCollapsed));
     setRecentFiles(s.recentFiles ?? []);
@@ -291,7 +345,7 @@ export default function App() {
 
   const refreshWorkspaceMeta = useCallback(async () => {
     try {
-      const meta = await invoke<WorkspaceMeta>("get_workspace_meta");
+      const meta = await getWorkspaceMeta();
       setWorkspaceMeta(meta);
       return meta;
     } catch (e) {
@@ -305,7 +359,7 @@ export default function App() {
 
   const refreshLibrary = useCallback(async () => {
     try {
-      const idx = await invoke<LibraryEntry[]>("get_library_index");
+      const idx = await getLibraryIndex();
       setLibraryEntries(idx);
     } catch (e) {
       setError(String(e));
@@ -315,7 +369,7 @@ export default function App() {
   const rescanLibrary = useCallback(async () => {
     setBusy(true);
     try {
-      const idx = await invoke<LibraryEntry[]>("scan_library");
+      const idx = await scanLibrary();
       setLibraryEntries(idx);
     } catch (e) {
       setError(String(e));
@@ -340,10 +394,7 @@ export default function App() {
       if (!renameWorkspaceTarget) return;
       setRenameWorkspaceBusy(true);
       try {
-        await invoke<string>("rename_workspace_file", {
-          path: renameWorkspaceTarget.path,
-          newName,
-        });
+        await renameWorkspaceFile(renameWorkspaceTarget.path, newName);
         setRenameWorkspaceTarget(null);
         await rescanLibrary();
       } catch (e) {
@@ -359,7 +410,7 @@ export default function App() {
     if (!deleteWorkspaceTarget) return;
     setDeleteWorkspaceBusy(true);
     try {
-      await invoke("delete_workspace_file", { path: deleteWorkspaceTarget.path });
+      await deleteWorkspaceFile(deleteWorkspaceTarget.path);
       setDeleteWorkspaceTarget(null);
       await rescanLibrary();
     } catch (e) {
@@ -377,13 +428,13 @@ export default function App() {
       // open. `get_database_path` returns "" and `has_open_budget`
       // returns false in that state. We treat both as "show home, run
       // no data fetches".
-      const path = await invoke<string>("get_database_path");
+      const path = await getDatabasePath();
       setDbPath(path);
-      const hasBudget = await invoke<boolean>("has_open_budget");
+      const hasBudget = await hasOpenBudget();
       setIsDefaultWorkspace(!hasBudget);
 
       try {
-        const supported = await invoke<boolean>("encryption_supported");
+        const supported = await encryptionSupported();
         setEncryptionAvailable(supported);
       } catch {
         // best effort
@@ -413,7 +464,7 @@ export default function App() {
       // schema queries. The backend opens lazily, so this avoids the
       // first command throwing an "ENCRYPTED:" error mid-bootstrap.
       try {
-        const enc = await invoke<boolean>("workspace_is_encrypted", { path });
+        const enc = await workspaceIsEncrypted(path);
         setWorkspaceEncrypted(enc);
         if (enc) {
           setPasswordError(null);
@@ -428,7 +479,7 @@ export default function App() {
 
       const initialYears = await refreshYears();
       void refreshWorkspaceMeta();
-      const autoSave = await invoke<boolean>("get_auto_save");
+      const autoSave = await getAutoSave();
       setAutoSaveOn(autoSave);
 
       // Backfill: ensure every existing year has all 12 calendar months. This is
@@ -439,7 +490,7 @@ export default function App() {
       if (initialYears.length > 0) {
         for (const y of initialYears) {
           try {
-            await invoke<number[]>("ensure_year_months", { yearId: y.id });
+            await ensureYearMonths(y.id);
           } catch {
             // ignore — best effort
           }
@@ -504,10 +555,7 @@ export default function App() {
   // multi-window setup always reflects the foreground window.
   useEffect(() => {
     const sync = () => {
-      void invoke("set_menu_context", {
-        hasBudget: !isDefaultWorkspace,
-        onLibrary: view.kind === "library",
-      });
+      void setMenuContext(!isDefaultWorkspace, view.kind === "library");
     };
     sync();
     let unlisten: UnlistenFn | undefined;
@@ -615,7 +663,7 @@ export default function App() {
   const refreshCrossYear = useCallback(async () => {
     setCrossYearLoading(true);
     try {
-      const data = await invoke<CrossYearOverview>("get_cross_year_overview");
+      const data = await getCrossYearOverview();
       setCrossYear(data);
     } catch (e) {
       setError(String(e));
@@ -684,9 +732,7 @@ export default function App() {
     }
     let cancelled = false;
     setDashboardSnapshotLoading(true);
-    invoke<YearOverview>("get_year_overview", {
-      yearId: effectiveDashboardYearId,
-    })
+    getYearOverview(effectiveDashboardYearId)
       .then((o) => {
         if (!cancelled) setYearOverview(o);
       })
@@ -726,10 +772,10 @@ export default function App() {
     async (filePath: string, opts?: { forceNewWindow?: boolean }) => {
       const reuse = !opts?.forceNewWindow && shouldReuseCurrentWindow();
       if (reuse) {
-        await invoke("open_budget_in_current_window", { filePath });
+        await openBudgetInCurrentWindow(filePath);
         await bootstrap();
       } else {
-        await invoke("open_budget_in_new_window", { filePath });
+        await openBudgetInNewWindow(filePath);
       }
       void refreshSettings();
     },
@@ -768,10 +814,10 @@ export default function App() {
         filters: [{ name: "mimo file", extensions: ["mimo"] }],
       });
       if (!target) return false;
-      await invoke("save_budget_as", { targetPath: target });
-      const newPath = await invoke<string>("get_database_path");
+      await saveBudgetAs(target);
+      const newPath = await getDatabasePath();
       setDbPath(newPath);
-      const hasBudget = await invoke<boolean>("has_open_budget");
+      const hasBudget = await hasOpenBudget();
       setIsDefaultWorkspace(!hasBudget);
       void refreshSettings();
       void refreshWorkspaceMeta();
@@ -796,7 +842,7 @@ export default function App() {
       setPasswordError(null);
       try {
         if (passwordModal === "unlock") {
-          const ok = await invoke<boolean>("unlock_workspace", { password });
+          const ok = await unlockWorkspace(password);
           if (!ok) {
             setPasswordError("Wrong password — try again.");
             return;
@@ -805,12 +851,12 @@ export default function App() {
           setPasswordModal(null);
           await bootstrap();
         } else if (passwordModal === "set") {
-          await invoke("encrypt_workspace", { password });
+          await encryptWorkspace(password);
           setWorkspaceEncrypted(true);
           setPasswordModal(null);
           showSaveToast("Budget encrypted");
         } else if (passwordModal === "change") {
-          await invoke("change_workspace_password", { newPassword: password });
+          await changeWorkspacePassword(password);
           setPasswordModal(null);
           showSaveToast("Password changed");
         }
@@ -832,7 +878,7 @@ export default function App() {
     // up-to-date because edits write through, so Cmd+S just confirms.
     if (isLauncherView) return;
     try {
-      const hasBudget = await invoke<boolean>("has_open_budget");
+      const hasBudget = await hasOpenBudget();
       if (!hasBudget) return;
       showSaveToast("Already saved");
     } catch (e) {
@@ -910,11 +956,7 @@ export default function App() {
           // sidebar's "+ New year" button.
           const reuse = shouldReuseCurrentWindow();
           const currentYear = new Date().getFullYear();
-          await invoke<string>("create_year_workspace", {
-            yearLabel: label,
-            scaffoldYearValue: currentYear,
-            reuseCurrentWindow: reuse,
-          });
+          await createYearWorkspace(label, currentYear, reuse);
           setCreateYearOpen(false);
           if (reuse) {
             // Backend already swapped this window's connection over to
@@ -924,7 +966,7 @@ export default function App() {
           }
           void refreshSettings();
         } else {
-          const newId = await invoke<number>("create_year", { yearLabel: label });
+          const newId = await createYear(label);
           await refreshYears();
           setCreateYearOpen(false);
           await enterYear(newId);
@@ -951,7 +993,7 @@ export default function App() {
       if (!target) return;
       setRenameYearBusy(true);
       try {
-        await invoke<string>("rename_year", { yearId: target.id, yearLabel: label });
+        await renameYear(target.id, label);
         setRenameYearTarget(null);
         await refreshYears();
         const yid = sidebarYearIdRef.current;
@@ -973,7 +1015,7 @@ export default function App() {
     if (!target) return;
     setDeleteYearBusy(true);
     try {
-      await invoke("delete_year", { yearId: target.id });
+      await deleteYear(target.id);
       setDeleteYearTarget(null);
       const list = await refreshYears();
       const stillSelected = list.find((y) => y.id === sidebarYearIdRef.current);
@@ -1001,9 +1043,7 @@ export default function App() {
       const target = yearsRef.current.find((y) => y.id === id) ?? null;
       if (!target) return;
       try {
-        const sourceMonths = await invoke<MonthRow[]>("list_months_for_year", {
-          yearId: target.id,
-        });
+        const sourceMonths = await listMonthsForYear(target.id);
         setDuplicateYearMonths(sourceMonths);
         setDuplicateYearTarget(target);
       } catch (e) {
@@ -1069,12 +1109,12 @@ export default function App() {
       if (!target) return;
       setDuplicateYearBusy(true);
       try {
-        const newId = await invoke<number>("duplicate_year", {
-          sourceYearId: target.id,
-          destYearLabel: args.destYearLabel,
-          mode: args.mode,
-          sourceMonthId: args.sourceMonthId ?? null,
-        });
+        const newId = await duplicateYear(
+          target.id,
+          args.destYearLabel,
+          args.mode,
+          args.sourceMonthId,
+        );
         setDuplicateYearTarget(null);
         await refreshYears();
         await enterYear(newId);
@@ -1090,14 +1130,14 @@ export default function App() {
   const onToggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
       const next = !prev;
-      void invoke("set_sidebar_collapsed", { collapsed: next }).catch(() => {});
+      void setSidebarCollapsedCmd(next).catch(() => {});
       return next;
     });
   }, []);
 
   const onRevealFolder = useCallback(async () => {
     try {
-      await invoke<string>("reveal_default_folder");
+      await revealDefaultFolder();
     } catch (e) {
       setError(String(e));
     }
@@ -1135,9 +1175,7 @@ export default function App() {
       });
       const sourcePath = typeof picked === "string" ? picked : null;
       if (!sourcePath) return;
-      const importedPath = await invoke<string>("import_workspace", {
-        sourcePath,
-      });
+      const importedPath = await importWorkspace(sourcePath);
       await rescanLibrary();
       await openWorkspaceFromHome(importedPath);
     } catch (e) {
@@ -1188,8 +1226,8 @@ export default function App() {
         event.preventDefault();
         void (async () => {
           try {
-            const hasBudget = await invoke<boolean>("has_open_budget");
-            const dirty = await invoke<boolean>("is_dirty");
+            const hasBudget = await hasOpenBudget();
+            const dirty = await isDirty();
             if (!hasBudget || !dirty) {
               await win.destroy();
               return;
@@ -1246,10 +1284,10 @@ export default function App() {
   const onToggleAutoSave = useCallback(async () => {
     try {
       const next = !autoSaveOn;
-      await invoke("set_auto_save", { enabled: next });
+      await setAutoSave(next);
       setAutoSaveOn(next);
       if (next) {
-        await invoke("save_snapshot");
+        await saveSnapshot();
       }
     } catch (e) {
       setError(String(e));
@@ -1365,7 +1403,7 @@ export default function App() {
       if (!ok) return;
       void (async () => {
         try {
-          await invoke("decrypt_workspace");
+          await decryptWorkspace();
           setWorkspaceEncrypted(false);
           h().showSaveToast("Encryption removed");
         } catch (e) {
@@ -1401,7 +1439,7 @@ export default function App() {
     const intervalMs = 5 * 60 * 1000;
     const id = window.setInterval(() => {
       setSnapshotState((s) => ({ ...s, busy: true }));
-      void invoke("save_snapshot")
+      void saveSnapshot()
         .then(() => {
           setSnapshotState({ busy: false, lastAt: Date.now() });
         })
@@ -1424,7 +1462,7 @@ export default function App() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const d = await invoke<boolean>("is_dirty");
+        const d = await isDirty();
         if (!cancelled) setDirty(d);
       } catch {
         // ignore — pill just shows last known state
@@ -1457,7 +1495,7 @@ export default function App() {
         setMonthView({ ...mv, expenseBuckets: orderedBuckets });
       });
       try {
-        await invoke("reorder_buckets", { monthId, orderedIds });
+        await reorderBucketsCmd(monthId, orderedIds);
       } catch (e) {
         setError(String(e));
         await refreshMonthView(monthId);
@@ -1522,28 +1560,25 @@ export default function App() {
       if (monthId == null) return;
       try {
         if (cfg.mode === "add") {
-          await invoke("add_expense_line", {
-            bucketId: cfg.bucketId,
-            name: payload.name,
-            isNeutralTransfer: payload.isNeutralTransfer,
-            isSinkingFund: payload.isSinkingFund,
-          });
+          await addExpenseLine(
+            cfg.bucketId,
+            payload.name,
+            payload.isNeutralTransfer,
+            payload.isSinkingFund,
+          );
         } else {
           if (payload.name !== cfg.initialName) {
-            await invoke("rename_expense_line", {
-              id: cfg.lineId,
-              name: payload.name,
-            });
+            await renameExpenseLine(cfg.lineId, payload.name);
           }
           if (
             payload.isNeutralTransfer !== cfg.initialNeutral ||
             payload.isSinkingFund !== cfg.initialSinking
           ) {
-            await invoke("update_expense_line_flags", {
-              lineId: cfg.lineId,
-              isNeutralTransfer: payload.isNeutralTransfer,
-              isSinkingFund: payload.isSinkingFund,
-            });
+            await updateExpenseLineFlags(
+              cfg.lineId,
+              payload.isNeutralTransfer,
+              payload.isSinkingFund,
+            );
           }
         }
         setLineEditConfig(null);
@@ -1562,7 +1597,7 @@ export default function App() {
     if (monthId == null) return;
     setDeleteBusy(true);
     try {
-      await invoke("delete_expense_line", { id: target.lineId });
+      await deleteExpenseLine(target.lineId);
       setPendingDelete(null);
       await refreshMonthView(monthId);
     } catch (e) {
@@ -1606,13 +1641,12 @@ export default function App() {
 
   const runExport = useCallback(
     async (
-      command: string,
-      args: Record<string, unknown> | undefined,
+      dataPromise: Promise<string>,
       filename: string,
       mime: string,
     ) => {
       try {
-        const out = await invoke<string>(command, args);
+        const out = await dataPromise;
         downloadFile(out, filename, mime);
       } catch (e) {
         setError(String(e));
@@ -1624,8 +1658,7 @@ export default function App() {
   const onExportCsv = useCallback(
     () =>
       runExport(
-        "export_csv_data",
-        undefined,
+        exportCsvData(),
         `${workspaceFilenameStem()}.csv`,
         "text/csv;charset=utf-8",
       ),
@@ -1635,8 +1668,7 @@ export default function App() {
   const onExportJson = useCallback(
     () =>
       runExport(
-        "export_workspace_json",
-        undefined,
+        exportWorkspaceJson(),
         `${workspaceFilenameStem()}.json`,
         "application/json;charset=utf-8",
       ),
@@ -1648,8 +1680,7 @@ export default function App() {
   const onExportCsvRedacted = useCallback(
     () =>
       runExport(
-        "export_workspace_csv_redacted",
-        undefined,
+        exportWorkspaceCsvRedacted(),
         `${workspaceFilenameStem()}-redacted.csv`,
         "text/csv;charset=utf-8",
       ),
@@ -1659,8 +1690,7 @@ export default function App() {
   const onExportJsonRedacted = useCallback(
     () =>
       runExport(
-        "export_workspace_json_redacted",
-        undefined,
+        exportWorkspaceJsonRedacted(),
         `${workspaceFilenameStem()}-redacted.json`,
         "application/json;charset=utf-8",
       ),
@@ -1670,8 +1700,7 @@ export default function App() {
   const onExportYearCsvRedacted = useCallback(
     (yearId: number, yearLabel: string) =>
       runExport(
-        "export_year_csv_redacted",
-        { yearId },
+        exportYearCsvRedacted(yearId),
         `${workspaceFilenameStem()}-${yearLabel || "year"}-redacted.csv`,
         "text/csv;charset=utf-8",
       ),
@@ -1681,8 +1710,7 @@ export default function App() {
   const onExportYearJsonRedacted = useCallback(
     (yearId: number, yearLabel: string) =>
       runExport(
-        "export_year_json_redacted",
-        { yearId },
+        exportYearJsonRedacted(yearId),
         `${workspaceFilenameStem()}-${yearLabel || "year"}-redacted.json`,
         "application/json;charset=utf-8",
       ),
@@ -1695,7 +1723,7 @@ export default function App() {
       // workspace-wide detailed CSV with a year-tagged filename. This keeps
       // the picker UX consistent without requiring a new backend command yet.
       try {
-        const csv = await invoke<string>("export_csv_data");
+        const csv = await exportCsvData();
         downloadFile(
           csv,
           `${workspaceFilenameStem()}-${yearLabel || "year"}.csv`,
@@ -1712,7 +1740,7 @@ export default function App() {
   const onExportYearJson = useCallback(
     async (yearId: number, yearLabel: string) => {
       try {
-        const json = await invoke<string>("export_workspace_json");
+        const json = await exportWorkspaceJson();
         downloadFile(
           json,
           `${workspaceFilenameStem()}-${yearLabel || "year"}.json`,
@@ -1729,8 +1757,7 @@ export default function App() {
   const onExportMonthCsv = useCallback(
     (monthId: number) =>
       runExport(
-        "export_month_csv",
-        { monthId },
+        exportMonthCsv(monthId),
         `${monthFilenameStem(monthId)}.csv`,
         "text/csv;charset=utf-8",
       ),
@@ -1740,8 +1767,7 @@ export default function App() {
   const onExportMonthJson = useCallback(
     (monthId: number) =>
       runExport(
-        "export_month_json",
-        { monthId },
+        exportMonthJson(monthId),
         `${monthFilenameStem(monthId)}.json`,
         "application/json;charset=utf-8",
       ),
@@ -1751,8 +1777,7 @@ export default function App() {
   const onExportMonthCsvRedacted = useCallback(
     (monthId: number) =>
       runExport(
-        "export_month_csv_redacted",
-        { monthId },
+        exportMonthCsvRedacted(monthId),
         `${monthFilenameStem(monthId)}-redacted.csv`,
         "text/csv;charset=utf-8",
       ),
@@ -1762,8 +1787,7 @@ export default function App() {
   const onExportMonthJsonRedacted = useCallback(
     (monthId: number) =>
       runExport(
-        "export_month_json_redacted",
-        { monthId },
+        exportMonthJsonRedacted(monthId),
         `${monthFilenameStem(monthId)}-redacted.json`,
         "application/json;charset=utf-8",
       ),
