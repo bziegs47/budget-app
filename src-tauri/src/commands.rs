@@ -729,11 +729,17 @@ pub fn delete_income_entry(conn: &Connection, id: i64) -> Result<(), String> {
 /// Lines come first (Income / Expense), then detail rows (Income Entry /
 /// Transaction) underneath. The `id` column that was previously exposed is
 /// dropped — internal DB rowids are meaningless outside the app.
+fn cents_to_dollars(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
+    let abs = cents.unsigned_abs();
+    format!("{sign}{}.{:02}", abs / 100, abs % 100)
+}
+
 fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String, String> {
     let mut w = String::new();
     append_csv_row(
         &mut w,
-        &["type", "bucket", "name", "month", "period", "planned_cents", "actual_cents"],
+        &["type", "bucket", "name", "month", "period", "planned", "actual"],
     );
 
     for m in months {
@@ -766,8 +772,8 @@ fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String
                     &name,
                     label,
                     slug,
-                    &planned.to_string(),
-                    &actual.to_string(),
+                    &cents_to_dollars(planned),
+                    &cents_to_dollars(actual),
                 ],
             );
 
@@ -786,7 +792,7 @@ fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String
                 let (entry_label, amt) = entry.map_err(err)?;
                 append_csv_row(
                     &mut w,
-                    &["Income Entry", "", &entry_label, label, slug, "", &amt.to_string()],
+                    &["Income Entry", "", &entry_label, label, slug, "", &cents_to_dollars(amt)],
                 );
             }
         }
