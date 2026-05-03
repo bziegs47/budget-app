@@ -6,6 +6,8 @@ USD amounts are stored as integer cents. The main grid shows rounded dollars and
 
 **Repository:** [github.com/bziegs47/budget-app](https://github.com/bziegs47/budget-app)
 
+**Download:** [mimo v0.1.0 (macOS Apple Silicon)](https://github.com/bziegs47/budget-app/releases/tag/v0.1.0)
+
 ## Files
 
 mimo workspaces are saved as `.mimo` files (each file holds one or more years). By default they live in `~/Documents/Budget/` — you can change the default folder in app settings.
