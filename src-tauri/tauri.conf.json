@@ -30,6 +30,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Finance",
+    "shortDescription": "Money In, Money Out — local-first desktop budget app",
+    "longDescription": "mimo is a local-first desktop budget app for macOS. Track income and expenses by month, compare years, and export your data. All data stays on your machine in .mimo files.",
+    "copyright": "© 2025 bziegs",
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
   }
 }
