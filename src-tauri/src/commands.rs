@@ -721,129 +721,190 @@ pub fn delete_income_entry(conn: &Connection, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn export_csv(conn: &Connection) -> Result<String, String> {
-    let mut w = String::new();
-    w.push_str("section,month,year_month,id,detail,amount_cents\n");
+/// Shared CSV generation for one or more months. The format is designed for
+/// human consumption and spreadsheet import:
+///
+///   type,bucket,name,month,period,planned_cents,actual_cents
+///
+/// Lines come first (Income / Expense), then detail rows (Income Entry /
+/// Transaction) underneath. The `id` column that was previously exposed is
+/// dropped — internal DB rowids are meaningless outside the app.
+fn cents_to_dollars(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
+    let abs = cents.unsigned_abs();
+    format!("{sign}{}.{:02}", abs / 100, abs % 100)
+}
 
-    let months = list_months(conn)?;
+fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String, String> {
+    let mut w = String::new();
+    append_csv_row(
+        &mut w,
+        &["type", "bucket", "name", "month", "period", "planned", "actual"],
+    );
+
     for m in months {
-        let slug = m.year_month.clone();
-        let label = m.tab_label.clone();
+        let slug = &m.year_month;
+        let label = &m.tab_label;
+
+        // ── Income lines ────────────────────────────────────────────────
         let mut stmt = conn
-            .prepare("SELECT id, name, planned_cents FROM income_lines WHERE month_id = ?1 ORDER BY sort_order")
+            .prepare(
+                "SELECT id, name, planned_cents FROM income_lines WHERE month_id = ?1 ORDER BY sort_order",
+            )
             .map_err(err)?;
         let rows = stmt
             .query_map([m.id], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })
             .map_err(err)?;
         for r in rows {
             let (id, name, planned) = r.map_err(err)?;
-            w.push_str(&format!(
-                "income_line,{},{},{},\"{}\",{}\n",
-                label, slug, id, name.replace('"', "'"), planned
-            ));
+            let actual = line_actual_income(conn, id)?;
+            append_csv_row(
+                &mut w,
+                &[
+                    "Income",
+                    "",
+                    &name,
+                    label,
+                    slug,
+                    &cents_to_dollars(planned),
+                    &cents_to_dollars(actual),
+                ],
+            );
+
+            // Income entries (detail rows)
+            let mut es = conn
+                .prepare(
+                    "SELECT label, amount_cents FROM income_entries WHERE income_line_id = ?1 ORDER BY sort_order, id",
+                )
+                .map_err(err)?;
+            let entries = es
+                .query_map([id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                })
+                .map_err(err)?;
+            for entry in entries {
+                let (entry_label, amt) = entry.map_err(err)?;
+                append_csv_row(
+                    &mut w,
+                    &["Income Entry", "", &entry_label, label, slug, "0.00", &cents_to_dollars(amt)],
+                );
+            }
         }
 
+        // ── Expense buckets & lines ─────────────────────────────────────
         let mut bs = conn
-            .prepare("SELECT id FROM expense_buckets WHERE month_id = ?1 ORDER BY sort_order")
+            .prepare(
+                "SELECT id, name FROM expense_buckets WHERE month_id = ?1 ORDER BY sort_order, id",
+            )
             .map_err(err)?;
-        let bids = bs
-            .query_map([m.id], |r| r.get::<_, i64>(0))
+        let bucket_rows = bs
+            .query_map([m.id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })
             .map_err(err)?;
-        for bid in bids {
-            let bid = bid.map_err(err)?;
+        let buckets: Vec<(i64, String)> = bucket_rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+
+        for (bucket_id, bucket_name) in &buckets {
             let mut ls = conn
                 .prepare(
-                    r#"SELECT id, name, planned_cents, is_neutral_transfer FROM expense_lines WHERE bucket_id = ?1 ORDER BY sort_order"#,
+                    "SELECT id, name, planned_cents FROM expense_lines WHERE bucket_id = ?1 ORDER BY sort_order, id",
                 )
                 .map_err(err)?;
             let lrows = ls
-                .query_map([bid], |r| {
+                .query_map([bucket_id], |r| {
                     Ok((
                         r.get::<_, i64>(0)?,
                         r.get::<_, String>(1)?,
                         r.get::<_, i64>(2)?,
-                        r.get::<_, i64>(3)?,
                     ))
                 })
                 .map_err(err)?;
             for lr in lrows {
-                let (lid, lname, planned, neutral) = lr.map_err(err)?;
-                w.push_str(&format!(
-                    "expense_line,{},{},{},\"{}\" (neutral={}),{}\n",
-                    label,
-                    slug,
-                    lid,
-                    lname.replace('"', "'"),
-                    neutral,
-                    planned
-                ));
+                let (line_id, line_name, planned) = lr.map_err(err)?;
+                let actual = line_actual_expense(conn, line_id)?;
+                append_csv_row(
+                    &mut w,
+                    &[
+                        "Expense",
+                        bucket_name,
+                        &line_name,
+                        label,
+                        slug,
+                        &cents_to_dollars(planned),
+                        &cents_to_dollars(actual),
+                    ],
+                );
+
+                // Transactions (detail rows)
+                let mut ts = conn
+                    .prepare(
+                        "SELECT payee, amount_cents FROM transactions WHERE expense_line_id = ?1 ORDER BY sort_order, id",
+                    )
+                    .map_err(err)?;
+                let txs = ts
+                    .query_map([line_id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                    })
+                    .map_err(err)?;
+                for tx in txs {
+                    let (payee, amt) = tx.map_err(err)?;
+                    append_csv_row(
+                        &mut w,
+                        &[
+                            "Transaction",
+                            bucket_name,
+                            &payee,
+                            label,
+                            slug,
+                            "0.00",
+                            &cents_to_dollars(amt),
+                        ],
+                    );
+                }
             }
-        }
-
-        let mut txq = conn
-            .prepare(
-                r#"
-            SELECT t.id, bm.year_month, t.payee, t.amount_cents, el.id
-            FROM transactions t
-            JOIN expense_lines el ON el.id = t.expense_line_id
-            JOIN expense_buckets eb ON eb.id = el.bucket_id
-            JOIN budget_months bm ON bm.id = eb.month_id
-            WHERE bm.id = ?1
-            ORDER BY t.id
-            "#,
-            )
-            .map_err(err)?;
-        let txs = txq.query_map([m.id], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, i64>(4)?,
-            ))
-        }).map_err(err)?;
-        for t in txs {
-            let (id, _yym, payee, amt, line_id) = t.map_err(err)?;
-            w.push_str(&format!(
-                "expense_tx,{},{},{},\"{}\",{}\n",
-                label, slug, line_id, payee.replace('"', "'"), amt
-            ));
-            let _ = id;
-        }
-
-        let mut ie = conn
-            .prepare(
-                r#"
-            SELECT ie.id, bm.year_month, ie.label, ie.amount_cents, il.id
-            FROM income_entries ie
-            JOIN income_lines il ON il.id = ie.income_line_id
-            JOIN budget_months bm ON bm.id = il.month_id
-            WHERE bm.id = ?1
-            ORDER BY ie.id
-            "#,
-            )
-            .map_err(err)?;
-        let ies = ie.query_map([m.id], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, i64>(4)?,
-            ))
-        }).map_err(err)?;
-        for row in ies {
-            let (_id, _ym, entry_label, amt, line_id) = row.map_err(err)?;
-            w.push_str(&format!(
-                "income_entry,{},{},{},\"{}\",{}\n",
-                label, slug, line_id, entry_label.replace('"', "'"), amt
-            ));
         }
     }
 
     Ok(w)
+}
+
+/// Shared JSON generation for one or more months.
+fn write_json_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String, String> {
+    let meta = get_workspace_meta(conn)?;
+    let mut month_views: Vec<MonthView> = Vec::with_capacity(months.len());
+    for m in months {
+        month_views.push(get_month_view(conn, m.id)?);
+    }
+    let payload = serde_json::json!({
+        "schemaVersion": meta.schema_version,
+        "exportedAt": chrono::Utc::now().to_rfc3339(),
+        "workspace": meta,
+        "months": month_views,
+    });
+    serde_json::to_string_pretty(&payload).map_err(err)
+}
+
+pub fn export_csv(conn: &Connection) -> Result<String, String> {
+    let months = list_months(conn)?;
+    write_csv_for_months(conn, &months)
+}
+
+pub fn export_year_csv(conn: &Connection, year_id: i64) -> Result<String, String> {
+    let months = list_months_for_year(conn, year_id)?;
+    write_csv_for_months(conn, &months)
+}
+
+pub fn export_year_json(conn: &Connection, year_id: i64) -> Result<String, String> {
+    let months = list_months_for_year(conn, year_id)?;
+    write_json_for_months(conn, &months)
 }
 
 pub fn get_workspace_meta(conn: &Connection) -> Result<WorkspaceMeta, String> {
@@ -1504,19 +1565,8 @@ pub fn get_year_overview(conn: &Connection, year_id: Option<i64>) -> Result<Year
 }
 
 pub fn export_workspace_json(conn: &Connection) -> Result<String, String> {
-    let meta = get_workspace_meta(conn)?;
     let months = list_months(conn)?;
-    let mut month_views: Vec<MonthView> = Vec::with_capacity(months.len());
-    for m in &months {
-        month_views.push(get_month_view(conn, m.id)?);
-    }
-    let payload = serde_json::json!({
-        "schemaVersion": meta.schema_version,
-        "exportedAt": chrono::Utc::now().to_rfc3339(),
-        "workspace": meta,
-        "months": month_views,
-    });
-    serde_json::to_string_pretty(&payload).map_err(err)
+    write_json_for_months(conn, &months)
 }
 
 /// Export a single month as CSV. Same column layout as `export_csv` so a single-month
@@ -1526,137 +1576,17 @@ pub fn export_month_csv(conn: &Connection, month_id: i64) -> Result<String, Stri
         .into_iter()
         .find(|m| m.id == month_id)
         .ok_or_else(|| format!("Month {month_id} not found"))?;
-
-    let mut w = String::new();
-    w.push_str("section,month,year_month,id,detail,amount_cents\n");
-    let slug = m.year_month.clone();
-    let label = m.tab_label.clone();
-
-    let mut stmt = conn
-        .prepare("SELECT id, name, planned_cents FROM income_lines WHERE month_id = ?1 ORDER BY sort_order")
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([m.id], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
-        })
-        .map_err(err)?;
-    for r in rows {
-        let (id, name, planned) = r.map_err(err)?;
-        w.push_str(&format!(
-            "income_line,{},{},{},\"{}\",{}\n",
-            label, slug, id, name.replace('"', "'"), planned
-        ));
-    }
-
-    let mut bs = conn
-        .prepare("SELECT id FROM expense_buckets WHERE month_id = ?1 ORDER BY sort_order")
-        .map_err(err)?;
-    let bids = bs.query_map([m.id], |r| r.get::<_, i64>(0)).map_err(err)?;
-    for bid in bids {
-        let bid = bid.map_err(err)?;
-        let mut ls = conn
-            .prepare(
-                r#"SELECT id, name, planned_cents, is_neutral_transfer FROM expense_lines WHERE bucket_id = ?1 ORDER BY sort_order"#,
-            )
-            .map_err(err)?;
-        let lrows = ls
-            .query_map([bid], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                ))
-            })
-            .map_err(err)?;
-        for lr in lrows {
-            let (lid, lname, planned, neutral) = lr.map_err(err)?;
-            w.push_str(&format!(
-                "expense_line,{},{},{},\"{}\" (neutral={}),{}\n",
-                label,
-                slug,
-                lid,
-                lname.replace('"', "'"),
-                neutral,
-                planned
-            ));
-        }
-    }
-
-    let mut txq = conn
-        .prepare(
-            r#"
-        SELECT t.id, t.payee, t.amount_cents, el.id
-        FROM transactions t
-        JOIN expense_lines el ON el.id = t.expense_line_id
-        JOIN expense_buckets eb ON eb.id = el.bucket_id
-        WHERE eb.month_id = ?1
-        ORDER BY t.id
-        "#,
-        )
-        .map_err(err)?;
-    let txs = txq
-        .query_map([m.id], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        })
-        .map_err(err)?;
-    for t in txs {
-        let (_id, payee, amt, line_id) = t.map_err(err)?;
-        w.push_str(&format!(
-            "expense_tx,{},{},{},\"{}\",{}\n",
-            label, slug, line_id, payee.replace('"', "'"), amt
-        ));
-    }
-
-    let mut ie = conn
-        .prepare(
-            r#"
-        SELECT ie.id, ie.label, ie.amount_cents, il.id
-        FROM income_entries ie
-        JOIN income_lines il ON il.id = ie.income_line_id
-        WHERE il.month_id = ?1
-        ORDER BY ie.id
-        "#,
-        )
-        .map_err(err)?;
-    let ies = ie
-        .query_map([m.id], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        })
-        .map_err(err)?;
-    for row in ies {
-        let (_id, entry_label, amt, line_id) = row.map_err(err)?;
-        w.push_str(&format!(
-            "income_entry,{},{},{},\"{}\",{}\n",
-            label, slug, line_id, entry_label.replace('"', "'"), amt
-        ));
-    }
-
-    Ok(w)
+    write_csv_for_months(conn, std::slice::from_ref(&m))
 }
 
 /// Export a single month as JSON. Mirrors `export_workspace_json` but with a
 /// single-element `months` array, so consumers can use the same parser.
 pub fn export_month_json(conn: &Connection, month_id: i64) -> Result<String, String> {
-    let meta = get_workspace_meta(conn)?;
-    let view = get_month_view(conn, month_id)?;
-    let payload = serde_json::json!({
-        "schemaVersion": meta.schema_version,
-        "exportedAt": chrono::Utc::now().to_rfc3339(),
-        "workspace": meta,
-        "months": [view],
-    });
-    serde_json::to_string_pretty(&payload).map_err(err)
+    let m = list_months(conn)?
+        .into_iter()
+        .find(|m| m.id == month_id)
+        .ok_or_else(|| format!("Month {month_id} not found"))?;
+    write_json_for_months(conn, std::slice::from_ref(&m))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

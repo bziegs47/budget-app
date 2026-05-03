@@ -350,6 +350,14 @@ export function exportMonthJson(monthId: number): Promise<string> {
   return invoke<string>("export_month_json", { monthId });
 }
 
+export function exportYearCsv(yearId: number): Promise<string> {
+  return invoke<string>("export_year_csv", { yearId });
+}
+
+export function exportYearJson(yearId: number): Promise<string> {
+  return invoke<string>("export_year_json", { yearId });
+}
+
 export function exportWorkspaceCsvRedacted(): Promise<string> {
   return invoke<string>("export_workspace_csv_redacted");
 }
@@ -372,4 +380,8 @@ export function exportMonthCsvRedacted(monthId: number): Promise<string> {
 
 export function exportMonthJsonRedacted(monthId: number): Promise<string> {
   return invoke<string>("export_month_json_redacted", { monthId });
+}
+
+export function writeExportFile(path: string, content: string): Promise<void> {
+  return invoke<void>("write_export_file", { path, content });
 }

@@ -1109,6 +1109,28 @@ fn export_month_json(
 }
 
 #[tauri::command]
+fn export_year_csv(
+    state: tauri::State<AppState>,
+    window: Window,
+    year_id: i64,
+) -> Result<String, String> {
+    state.with_conn(&label_of(&window), |conn| {
+        commands::export_year_csv(conn, year_id)
+    })
+}
+
+#[tauri::command]
+fn export_year_json(
+    state: tauri::State<AppState>,
+    window: Window,
+    year_id: i64,
+) -> Result<String, String> {
+    state.with_conn(&label_of(&window), |conn| {
+        commands::export_year_json(conn, year_id)
+    })
+}
+
+#[tauri::command]
 fn export_workspace_csv_redacted(
     state: tauri::State<AppState>,
     window: Window,
@@ -1485,6 +1507,16 @@ fn reveal_default_folder(app_handle: tauri::AppHandle) -> Result<String, String>
     Ok(folder_str)
 }
 
+#[tauri::command]
+fn write_export_file(path: String, content: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&p, content.as_bytes())
+        .map_err(|e| format!("Could not write '{}': {e}", p.display()))
+}
+
 fn prune_autosaves(dir: &Path, stem: &str, keep: usize) {
     let Ok(read) = std::fs::read_dir(dir) else { return };
     let prefix = format!("{stem}.");
@@ -1667,6 +1699,8 @@ pub fn run() {
             get_line_calendar_report,
             get_multi_line_calendar_report,
             export_workspace_json,
+            export_year_csv,
+            export_year_json,
             export_month_csv,
             export_month_json,
             export_workspace_csv_redacted,
@@ -1694,6 +1728,7 @@ pub fn run() {
             get_library_index,
             create_year_workspace,
             reveal_default_folder,
+            write_export_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,8 +29,11 @@ import {
   exportWorkspaceCsvRedacted,
   exportWorkspaceJson,
   exportWorkspaceJsonRedacted,
+  exportYearCsv,
   exportYearCsvRedacted,
+  exportYearJson,
   exportYearJsonRedacted,
+  writeExportFile,
   getAutoSave,
   getCrossYearOverview,
   getDatabasePath,
@@ -1490,22 +1493,6 @@ export default function App() {
     }
   }, [pendingDelete, refreshMonthView, activeMonthId]);
 
-  // Common downloader used by every export flow. Centralising the Blob/URL
-  // dance avoids subtle leaks (forgetting revokeObjectURL) and makes the
-  // call sites read like declarative recipes — name in, file out.
-  const downloadFile = useCallback(
-    (content: string, filename: string, mime: string) => {
-      const blob = new Blob([content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    [],
-  );
-
   const workspaceFilenameStem = useCallback(
     () => (basenameNoExt(dbPath) || "mimo").replace(/\s+/g, "_"),
     [dbPath],
@@ -1525,17 +1512,26 @@ export default function App() {
   const runExport = useCallback(
     async (
       dataPromise: Promise<string>,
-      filename: string,
-      mime: string,
+      defaultFilename: string,
+      extensions: string[],
     ) => {
       try {
         const out = await dataPromise;
-        downloadFile(out, filename, mime);
+        const defaultDir = settings?.defaultFolder ?? undefined;
+        const target = await saveDialog({
+          title: "Export",
+          defaultPath: defaultDir
+            ? `${defaultDir}/${defaultFilename}`
+            : defaultFilename,
+          filters: [{ name: "Export file", extensions }],
+        });
+        if (!target) return;
+        await writeExportFile(target, out);
       } catch (e) {
         setError(String(e));
       }
     },
-    [downloadFile],
+    [settings],
   );
 
   const onExportCsv = useCallback(
@@ -1543,7 +1539,7 @@ export default function App() {
       runExport(
         exportCsvData(),
         `${workspaceFilenameStem()}.csv`,
-        "text/csv;charset=utf-8",
+        ["csv"],
       ),
     [runExport, workspaceFilenameStem],
   );
@@ -1553,19 +1549,17 @@ export default function App() {
       runExport(
         exportWorkspaceJson(),
         `${workspaceFilenameStem()}.json`,
-        "application/json;charset=utf-8",
+        ["json"],
       ),
     [runExport, workspaceFilenameStem],
   );
 
-  // Redacted variants share the file naming scheme but get a `-redacted`
-  // suffix so a sender can tell at a glance which version they attached.
   const onExportCsvRedacted = useCallback(
     () =>
       runExport(
         exportWorkspaceCsvRedacted(),
         `${workspaceFilenameStem()}-redacted.csv`,
-        "text/csv;charset=utf-8",
+        ["csv"],
       ),
     [runExport, workspaceFilenameStem],
   );
@@ -1575,7 +1569,7 @@ export default function App() {
       runExport(
         exportWorkspaceJsonRedacted(),
         `${workspaceFilenameStem()}-redacted.json`,
-        "application/json;charset=utf-8",
+        ["json"],
       ),
     [runExport, workspaceFilenameStem],
   );
@@ -1585,7 +1579,7 @@ export default function App() {
       runExport(
         exportYearCsvRedacted(yearId),
         `${workspaceFilenameStem()}-${yearLabel || "year"}-redacted.csv`,
-        "text/csv;charset=utf-8",
+        ["csv"],
       ),
     [runExport, workspaceFilenameStem],
   );
@@ -1595,46 +1589,29 @@ export default function App() {
       runExport(
         exportYearJsonRedacted(yearId),
         `${workspaceFilenameStem()}-${yearLabel || "year"}-redacted.json`,
-        "application/json;charset=utf-8",
+        ["json"],
       ),
     [runExport, workspaceFilenameStem],
   );
 
   const onExportYearCsv = useCallback(
-    async (yearId: number, yearLabel: string) => {
-      // No backend "year detailed" export today, so fall back to the
-      // workspace-wide detailed CSV with a year-tagged filename. This keeps
-      // the picker UX consistent without requiring a new backend command yet.
-      try {
-        const csv = await exportCsvData();
-        downloadFile(
-          csv,
-          `${workspaceFilenameStem()}-${yearLabel || "year"}.csv`,
-          "text/csv;charset=utf-8",
-        );
-        void yearId;
-      } catch (e) {
-        setError(String(e));
-      }
-    },
-    [downloadFile, workspaceFilenameStem],
+    (yearId: number, yearLabel: string) =>
+      runExport(
+        exportYearCsv(yearId),
+        `${workspaceFilenameStem()}-${yearLabel || "year"}.csv`,
+        ["csv"],
+      ),
+    [runExport, workspaceFilenameStem],
   );
 
   const onExportYearJson = useCallback(
-    async (yearId: number, yearLabel: string) => {
-      try {
-        const json = await exportWorkspaceJson();
-        downloadFile(
-          json,
-          `${workspaceFilenameStem()}-${yearLabel || "year"}.json`,
-          "application/json;charset=utf-8",
-        );
-        void yearId;
-      } catch (e) {
-        setError(String(e));
-      }
-    },
-    [downloadFile, workspaceFilenameStem],
+    (yearId: number, yearLabel: string) =>
+      runExport(
+        exportYearJson(yearId),
+        `${workspaceFilenameStem()}-${yearLabel || "year"}.json`,
+        ["json"],
+      ),
+    [runExport, workspaceFilenameStem],
   );
 
   const onExportMonthCsv = useCallback(
@@ -1642,7 +1619,7 @@ export default function App() {
       runExport(
         exportMonthCsv(monthId),
         `${monthFilenameStem(monthId)}.csv`,
-        "text/csv;charset=utf-8",
+        ["csv"],
       ),
     [runExport, monthFilenameStem],
   );
@@ -1652,7 +1629,7 @@ export default function App() {
       runExport(
         exportMonthJson(monthId),
         `${monthFilenameStem(monthId)}.json`,
-        "application/json;charset=utf-8",
+        ["json"],
       ),
     [runExport, monthFilenameStem],
   );
@@ -1662,7 +1639,7 @@ export default function App() {
       runExport(
         exportMonthCsvRedacted(monthId),
         `${monthFilenameStem(monthId)}-redacted.csv`,
-        "text/csv;charset=utf-8",
+        ["csv"],
       ),
     [runExport, monthFilenameStem],
   );
@@ -1672,7 +1649,7 @@ export default function App() {
       runExport(
         exportMonthJsonRedacted(monthId),
         `${monthFilenameStem(monthId)}-redacted.json`,
-        "application/json;charset=utf-8",
+        ["json"],
       ),
     [runExport, monthFilenameStem],
   );
