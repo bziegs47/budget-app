@@ -792,7 +792,7 @@ fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String
                 let (entry_label, amt) = entry.map_err(err)?;
                 append_csv_row(
                     &mut w,
-                    &["Income Entry", "", &entry_label, label, slug, "", &cents_to_dollars(amt)],
+                    &["Income Entry", "", &entry_label, label, slug, "0.00", &cents_to_dollars(amt)],
                 );
             }
         }
@@ -864,7 +864,7 @@ fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String
                             &payee,
                             label,
                             slug,
-                            "",
+                            "0.00",
                             &cents_to_dollars(amt),
                         ],
                     );
