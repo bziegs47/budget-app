@@ -838,8 +838,8 @@ fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String
                         &line_name,
                         label,
                         slug,
-                        &planned.to_string(),
-                        &actual.to_string(),
+                        &cents_to_dollars(planned),
+                        &cents_to_dollars(actual),
                     ],
                 );
 
@@ -865,7 +865,7 @@ fn write_csv_for_months(conn: &Connection, months: &[MonthRow]) -> Result<String
                             label,
                             slug,
                             "",
-                            &amt.to_string(),
+                            &cents_to_dollars(amt),
                         ],
                     );
                 }
